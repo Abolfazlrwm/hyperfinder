@@ -1,0 +1,19 @@
+# Normalize line endings so the repository is byte-identical on every OS.
+# Text files are stored as LF; Windows-only scripts keep CRLF.
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files must never be converted.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.svg text
+*.zip binary
+*.gz binary
+*.exe binary
+*.dll binary
+*.pdf binary
