@@ -1,31 +1,43 @@
-# 🚀 hyperfinder
+# hyperfinder
 
-A multi-threaded command-line file search tool built with **Modern C++17**.
+A multi-threaded command-line file search tool built with **C++17**.
 
-## 💡 Why This Project?
+## Overview
 
-Traditional sequential file scanning is slow on modern NVMe drives. **hyperfinder** leverages parallel processing by utilizing a custom-built **Thread Pool**, distributing directory traversal across all available CPU cores.
+hyperfinder walks a directory tree and reports every file whose name contains a
+given substring. Directory traversal is spread across a pool of worker threads
+instead of running sequentially.
 
-## 🛠 Architecture
+## Architecture
 
-- **Thread Pool Pattern**: Avoids the overhead of creating/destroying threads by reusing a worker pool.
-- **Atomic Operations**: High-speed, lock-free file counting.
-- **Recursive Task Spawning**: Each subdirectory found is pushed as a new task to the pool, maximizing concurrency.
-- **RAII & Modern STL**: Zero raw pointers, safe resource management using `std::filesystem` and `std::mutex`.
+- **Thread pool**: a fixed set of worker threads is reused for the whole scan
+  instead of spawning one thread per directory.
+- **Recursive task spawning**: each subdirectory found is pushed to the pool as a
+  new task.
+- **Atomic counters**: the number of scanned entries is tracked with
+  `std::atomic`.
+- **Standard library only**: `std::filesystem`, `std::mutex` and
+  `std::condition_variable`, no third-party dependencies.
 
-## 🚀 Features
+## Features
 
-- [x] **Blazing Fast**: Multi-threaded directory crawling.
-- [x] **Smart Search**: Case-insensitive partial name matching.
-- [x] **Resource Efficient**: Uses `hardware_concurrency` to adapt to your CPU.
-- [x] **Cross-Platform**: Built using pure C++ STL.
+- [x] Multi-threaded directory traversal
+- [x] Case-insensitive substring matching on file names
+- [x] Worker count derived from `std::thread::hardware_concurrency()`
+- [x] No external dependencies
 
-## 🔨 Build Instructions
+## Status
+
+Work in progress. This is the original prototype, renamed and versioned as the
+starting point of a cleanup effort. Known issues are tracked in the commit
+history; correctness, tests and benchmarks are not yet in place.
+
+## Build
 
 ```bash
 mkdir build && cd build
 cmake ..
-make
+cmake --build .
 ```
 
 Run it with a search term and a directory:
@@ -34,6 +46,9 @@ Run it with a search term and a directory:
 ./hyperfinder <search_term> <directory_path>
 ```
 
-## 📄 License
+Verified on Windows 11 with MinGW-w64 GCC 16.2.0 and CMake 4.2.3. Linux and
+macOS builds are expected to work but have not been verified yet.
 
-MIT
+## License
+
+MIT - see [LICENSE](LICENSE).
