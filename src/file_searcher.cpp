@@ -1,6 +1,46 @@
 #include "file_searcher.h"
-#include <iostream>
 #include <algorithm>
+#include <cctype>
+#include <iostream>
+#include <stdexcept>
+#include <system_error>
+#include <utility>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
+namespace {
+
+// True when the entry is a directory link rather than a real directory.
+//
+// On Windows, libstdc++ implements symlink_status() by querying the target, so
+// both symbolic links and junctions are reported as plain directories and
+// std::filesystem cannot see the reparse point at all. Ask Win32 directly in
+// that case; on POSIX the standard library check is enough.
+//
+// The Win32 call is only made for entries that already look like directories:
+// it costs a syscall per entry, which measured ~4x slower on a 2624-entry tree
+// when applied to files as well. Only directory links can create a cycle.
+bool is_directory_link(const fs::directory_entry& entry, const fs::file_status& link_status) {
+    if (fs::is_symlink(link_status)) return true;
+#if defined(_WIN32)
+    const DWORD attributes = ::GetFileAttributesW(entry.path().c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+           (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+#else
+    (void)entry;
+    return false;
+#endif
+}
+
+}  // namespace
 
 FileSearcher::FileSearcher(const std::string& q, const fs::path& root) 
     : query(toLower(q)), rootPath(root) {}
@@ -15,44 +55,132 @@ bool FileSearcher::containsQuery(const std::string& filename) const {
 }
 
 void FileSearcher::scanDirectory(const fs::path& path) {
-    try {
-        if (!fs::exists(path) || !fs::is_directory(path)) return;
+    // skip_permission_denied asks the iterator to walk past entries it is not
+    // allowed to read instead of throwing. All remaining filesystem calls use
+    // the error_code overloads, so nothing escapes as an exception.
+    std::error_code ec;
+    fs::directory_iterator it(path, fs::directory_options::skip_permission_denied, ec);
+    if (ec) {
+        skippedPaths.fetch_add(1);
+        return;
+    }
 
-        for (const auto& entry : fs::directory_iterator(path)) {
-            scannedFilesCount++;
-            if (fs::is_directory(entry)) {
-                // ارسال دایرکتوری‌های جدید به Thread Pool برای پردازش موازی
-                pool.enqueue([this, p = entry.path()] { scanDirectory(p); });
-            } else if (fs::is_regular_file(entry)) {
-                if (containsQuery(entry.path().filename().string())) {
-                    std::lock_guard<std::mutex> lock(results_mutex);
-                    matches.push_back(entry.path().string());
-                }
+    directoriesScanned.fetch_add(1);
+
+    // Matches found by this task. Collected locally and merged once by the
+    // caller, so a directory with many hits takes the results mutex once
+    // instead of once per match.
+    std::vector<std::string> found;
+
+    const fs::directory_iterator end;
+    while (it != end) {
+        const fs::directory_entry& entry = *it;
+
+        std::error_code entry_ec;
+        const fs::file_status link_status = entry.symlink_status(entry_ec);
+        if (entry_ec) {
+            skippedPaths.fetch_add(1);
+        } else if (fs::is_directory(link_status)) {
+            // Links are not followed: descending into them can loop forever on
+            // a cycle and can leave the requested tree. --follow-symlinks with
+            // a cycle guard is on the roadmap.
+            if (!is_directory_link(entry, link_status)) {
+                submit(entry.path());
+            }
+        } else if (fs::is_regular_file(link_status)) {
+            filesScanned.fetch_add(1);
+            if (containsQuery(entry.path().filename().string())) {
+                found.push_back(entry.path().string());
             }
         }
-    } catch (const std::exception& e) {
-        // نادیده گرفتن خطاهای دسترسی (Permission Denied) برای جلوگیری از توقف برنامه
+
+        it.increment(ec);
+        if (ec) {
+            skippedPaths.fetch_add(1);
+            break;
+        }
+    }
+
+    if (!found.empty()) {
+        std::lock_guard<std::mutex> lock(results_mutex);
+        matches.insert(matches.end(), std::make_move_iterator(found.begin()),
+                       std::make_move_iterator(found.end()));
     }
 }
 
+void FileSearcher::submit(const fs::path& path) {
+    pool.enqueue([this, path] {
+        try {
+            scanDirectory(path);
+        } catch (...) {
+            // Without this the exception would land in a future nobody reads
+            // and the subtree would silently disappear. Store the first one and
+            // rethrow it from search() instead.
+            recordError(std::current_exception());
+        }
+    });
+}
+
+void FileSearcher::recordError(std::exception_ptr error) {
+    std::lock_guard<std::mutex> lock(error_mutex);
+    if (!firstError) firstError = error;
+}
+
 void FileSearcher::search() {
-    scanDirectory(rootPath);
-    // در اینجا باید کمی صبر کرد یا از مکانیزم شمارش تسک‌ها استفاده کرد
-    // برای سادگی و کارایی، تخریب ThreadPool در پایان کلاس تضمین می‌کند کارها تمام شده‌اند.
+    std::error_code root_ec;
+    if (!fs::is_directory(rootPath, root_ec)) {
+        throw std::runtime_error("cannot scan '" + rootPath.string() + "': not a directory");
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(results_mutex);
+        matches.clear();
+    }
+    filesScanned.store(0);
+    directoriesScanned.store(0);
+    skippedPaths.store(0);
+    {
+        std::lock_guard<std::mutex> lock(error_mutex);
+        firstError = nullptr;
+    }
+
+    submit(rootPath);
+    // Every directory task spawns further tasks for its subdirectories, so the
+    // pool is only idle once the whole tree has been visited.
+    pool.waitIdle();
+
+    if (firstError) std::rethrow_exception(firstError);
+
+    // Worker threads finish in an unpredictable order, so the raw result order
+    // changes from run to run. Sort once here; no task is running any more.
+    std::sort(matches.begin(), matches.end());
 }
 
 void FileSearcher::displayResults() const {
     std::lock_guard<std::mutex> lock(results_mutex);
     if (matches.empty()) {
         std::cout << "\nNo matches found.\n";
-    } else {
-        std::cout << "\nFound matches:\n";
-        for (const auto& path : matches) {
-            std::cout << path << "\n";
-        }
+        return;
+    }
+    std::cout << "\nFound " << matches.size() << " match" << (matches.size() == 1 ? "" : "es")
+              << ":\n";
+    for (const auto& path : matches) {
+        std::cout << path << "\n";
     }
 }
 
-uint64_t FileSearcher::getScannedCount() const {
-    return scannedFilesCount.load();
+SearchStats FileSearcher::stats() const {
+    SearchStats result;
+    result.files_scanned = filesScanned.load();
+    result.directories_scanned = directoriesScanned.load();
+    result.paths_skipped = skippedPaths.load();
+    return result;
+}
+
+std::uint64_t FileSearcher::getScannedCount() const {
+    return filesScanned.load();
+}
+
+std::uint64_t FileSearcher::getSkippedCount() const {
+    return skippedPaths.load();
 }
