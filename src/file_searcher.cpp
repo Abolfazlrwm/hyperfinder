@@ -1,8 +1,9 @@
 #include "file_searcher.h"
-#include <iostream>
 #include <algorithm>
-#include <system_error>
+#include <cctype>
+#include <iostream>
 #include <stdexcept>
+#include <system_error>
 #include <utility>
 
 #if defined(_WIN32)
