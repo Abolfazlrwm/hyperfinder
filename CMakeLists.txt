@@ -1,9 +1,30 @@
 cmake_minimum_required(VERSION 3.16)
-project(hyperfinder VERSION 0.1.0 LANGUAGES CXX)
+
+project(hyperfinder
+    VERSION 0.1.0
+    DESCRIPTION "Multi-threaded file finder"
+    HOMEPAGE_URL "https://github.com/Abolfazlrwm/hyperfinder"
+    LANGUAGES CXX
+)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Single-config generators (Makefiles, Ninja) leave CMAKE_BUILD_TYPE empty when
+# the user does not pass one, which silently produces an unoptimised binary
+# with no debug information either. Default to Release so that a plain
+# "cmake -S . -B build && cmake --build build" does the obvious thing.
+# Multi-config generators (Visual Studio, Xcode) choose the configuration at
+# build time instead and are left alone.
+get_property(HYPERFINDER_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT HYPERFINDER_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING
+        "Build type: Debug, Release, RelWithDebInfo or MinSizeRel" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+        Debug Release RelWithDebInfo MinSizeRel)
+    message(STATUS "No build type specified, defaulting to Release")
+endif()
 
 find_package(Threads REQUIRED)
 
