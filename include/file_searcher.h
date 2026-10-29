@@ -16,6 +16,7 @@ public:
     void search();
     void displayResults() const;
     uint64_t getScannedCount() const;
+    uint64_t getSkippedCount() const;
 
 private:
     void scanDirectory(const fs::path& path);
@@ -27,6 +28,7 @@ private:
     std::vector<std::string> matches;
     mutable std::mutex results_mutex;
     std::atomic<uint64_t> scannedFilesCount{0};
+    std::atomic<uint64_t> skippedPathsCount{0};
     ThreadPool pool;
 };
 
