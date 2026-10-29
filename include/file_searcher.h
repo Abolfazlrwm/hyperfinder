@@ -29,6 +29,11 @@ public:
     void search();
 
     void displayResults() const;
+
+    // Matches from the last search(), sorted. Safe to call once search() has
+    // returned; not safe to call while a search is running.
+    const std::vector<std::string>& results() const noexcept;
+
     SearchStats stats() const;
     std::uint64_t getScannedCount() const;
     std::uint64_t getSkippedCount() const;

@@ -177,6 +177,10 @@ void FileSearcher::displayResults() const {
     }
 }
 
+const std::vector<std::string>& FileSearcher::results() const noexcept {
+    return matches;
+}
+
 SearchStats FileSearcher::stats() const {
     SearchStats result;
     result.files_scanned = filesScanned.load();
