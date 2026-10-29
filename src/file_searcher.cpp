@@ -2,6 +2,8 @@
 #include <iostream>
 #include <algorithm>
 #include <system_error>
+#include <stdexcept>
+#include <utility>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -58,9 +60,11 @@ void FileSearcher::scanDirectory(const fs::path& path) {
     std::error_code ec;
     fs::directory_iterator it(path, fs::directory_options::skip_permission_denied, ec);
     if (ec) {
-        skippedPathsCount.fetch_add(1);
+        skippedPaths.fetch_add(1);
         return;
     }
+
+    directoriesScanned.fetch_add(1);
 
     const fs::directory_iterator end;
     while (it != end) {
@@ -69,17 +73,16 @@ void FileSearcher::scanDirectory(const fs::path& path) {
         std::error_code entry_ec;
         const fs::file_status link_status = entry.symlink_status(entry_ec);
         if (entry_ec) {
-            skippedPathsCount.fetch_add(1);
+            skippedPaths.fetch_add(1);
         } else if (fs::is_directory(link_status)) {
             // Links are not followed: descending into them can loop forever on
             // a cycle and can leave the requested tree. --follow-symlinks with
             // a cycle guard is on the roadmap.
             if (!is_directory_link(entry, link_status)) {
-                scannedFilesCount.fetch_add(1);
-                pool.enqueue([this, sub = entry.path()] { scanDirectory(sub); });
+                submit(entry.path());
             }
         } else if (fs::is_regular_file(link_status)) {
-            scannedFilesCount.fetch_add(1);
+            filesScanned.fetch_add(1);
             if (containsQuery(entry.path().filename().string())) {
                 std::lock_guard<std::mutex> lock(results_mutex);
                 matches.push_back(entry.path().string());
@@ -88,17 +91,54 @@ void FileSearcher::scanDirectory(const fs::path& path) {
 
         it.increment(ec);
         if (ec) {
-            skippedPathsCount.fetch_add(1);
+            skippedPaths.fetch_add(1);
             break;
         }
     }
 }
 
+void FileSearcher::submit(const fs::path& path) {
+    pool.enqueue([this, path] {
+        try {
+            scanDirectory(path);
+        } catch (...) {
+            // Without this the exception would land in a future nobody reads
+            // and the subtree would silently disappear. Store the first one and
+            // rethrow it from search() instead.
+            recordError(std::current_exception());
+        }
+    });
+}
+
+void FileSearcher::recordError(std::exception_ptr error) {
+    std::lock_guard<std::mutex> lock(error_mutex);
+    if (!firstError) firstError = error;
+}
+
 void FileSearcher::search() {
-    pool.enqueue([this, root = rootPath] { scanDirectory(root); });
+    std::error_code root_ec;
+    if (!fs::is_directory(rootPath, root_ec)) {
+        throw std::runtime_error("cannot scan '" + rootPath.string() + "': not a directory");
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(results_mutex);
+        matches.clear();
+    }
+    filesScanned.store(0);
+    directoriesScanned.store(0);
+    skippedPaths.store(0);
+    {
+        std::lock_guard<std::mutex> lock(error_mutex);
+        firstError = nullptr;
+    }
+
+    submit(rootPath);
     // Every directory task spawns further tasks for its subdirectories, so the
     // pool is only idle once the whole tree has been visited.
     pool.waitIdle();
+
+    if (firstError) std::rethrow_exception(firstError);
 }
 
 void FileSearcher::displayResults() const {
@@ -113,10 +153,18 @@ void FileSearcher::displayResults() const {
     }
 }
 
-uint64_t FileSearcher::getScannedCount() const {
-    return scannedFilesCount.load();
+SearchStats FileSearcher::stats() const {
+    SearchStats result;
+    result.files_scanned = filesScanned.load();
+    result.directories_scanned = directoriesScanned.load();
+    result.paths_skipped = skippedPaths.load();
+    return result;
 }
 
-uint64_t FileSearcher::getSkippedCount() const {
-    return skippedPathsCount.load();
+std::uint64_t FileSearcher::getScannedCount() const {
+    return filesScanned.load();
+}
+
+std::uint64_t FileSearcher::getSkippedCount() const {
+    return skippedPaths.load();
 }

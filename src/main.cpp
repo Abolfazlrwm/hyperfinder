@@ -31,7 +31,10 @@ int main(int argc, char *argv[])
 
         std::cout << "\n----------------------------------------\n";
         std::cout << "Scan completed in " << elapsed.count() << " seconds\n";
-        std::cout << "Files scanned: " << searcher.getScannedCount() << "\n";
+        const SearchStats stats = searcher.stats();
+        std::cout << "Files scanned: " << stats.files_scanned << "\n";
+        std::cout << "Directories scanned: " << stats.directories_scanned << "\n";
+        std::cout << "Paths skipped: " << stats.paths_skipped << "\n";
     }
     catch (const std::exception &e)
     {
