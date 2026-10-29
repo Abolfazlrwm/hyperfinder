@@ -1,6 +1,7 @@
 #include "thread_pool.h"
 
 ThreadPool::ThreadPool(size_t threads) : stop(false) {
+    if (threads == 0) threads = 1;  // a pool without workers would never drain
     workers.reserve(threads);
     for (size_t i = 0; i < threads; ++i) {
         workers.emplace_back([this] { workerLoop(); });
@@ -49,4 +50,9 @@ void ThreadPool::waitIdle() {
 
 std::size_t ThreadPool::threadCount() const noexcept {
     return workers.size();
+}
+
+std::size_t ThreadPool::defaultThreadCount() noexcept {
+    const unsigned detected = std::thread::hardware_concurrency();
+    return detected == 0 ? 1U : static_cast<std::size_t>(detected);
 }

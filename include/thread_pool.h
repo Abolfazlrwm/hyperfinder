@@ -24,7 +24,9 @@
 // calling worker would block forever waiting for its own completion.
 class ThreadPool {
 public:
-    explicit ThreadPool(size_t threads = std::thread::hardware_concurrency());
+    // thread_count == 0 is treated as 1: a pool without workers would accept
+    // tasks that never run and make waitIdle() block forever.
+    explicit ThreadPool(size_t threads = defaultThreadCount());
     ~ThreadPool();
 
     ThreadPool(const ThreadPool&) = delete;
@@ -36,8 +38,12 @@ public:
     // Blocks until every queued task has been executed and no task is running.
     void waitIdle();
 
-    // Number of worker threads created by the constructor.
+    // Number of worker threads created by the constructor (always >= 1).
     std::size_t threadCount() const noexcept;
+
+    // std::thread::hardware_concurrency() is allowed to return 0 when the
+    // number of CPUs cannot be determined; fall back to a single worker.
+    static std::size_t defaultThreadCount() noexcept;
 
 private:
     void workerLoop();
