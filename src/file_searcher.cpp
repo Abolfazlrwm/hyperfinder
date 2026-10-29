@@ -51,7 +51,12 @@ bool is_directory_link(const fs::directory_entry& entry, const fs::file_status& 
 }  // namespace
 
 FileSearcher::FileSearcher(const std::string& q, const fs::path& root) 
-    : query(toLower(q)), rootPath(root) {}
+    : query(toLower(q)), rootPath(root) {
+    // Normalise the separator style once, at the root. std::filesystem appends
+    // the native separator to whatever form the parent path already has, so a
+    // root written as "C:/data" produced results like "C:/data\sub\file.txt".
+    rootPath.make_preferred();
+}
 
 bool FileSearcher::containsQuery(const std::string& filename) const {
     return toLower(filename).find(query) != std::string::npos;
