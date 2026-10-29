@@ -16,3 +16,10 @@ add_executable(hyperfinder
 )
 
 target_link_libraries(hyperfinder PRIVATE Threads::Threads)
+
+# Strict warnings: the project is expected to build without a single one.
+if(MSVC)
+    target_compile_options(hyperfinder PRIVATE /W4)
+else()
+    target_compile_options(hyperfinder PRIVATE -Wall -Wextra -Wpedantic)
+endif()
