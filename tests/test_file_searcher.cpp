@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 
@@ -165,7 +166,10 @@ TEST_CASE("FileSearcher: a symlink cycle does not cause an endless scan") {
     std::error_code ec;
     fs::create_directory_symlink(tree.root(), link, ec);
     if (ec || !fs::exists(link)) {
-        MESSAGE("skipped: cannot create directory symlinks here (" << ec.message() << ")");
+        // Printed directly: doctest hides MESSAGE/WARN_MESSAGE unless the run is
+        // verbose, and a skipped test should be visible in a plain ctest run.
+        std::cout << "[ skip ] symlink cycle test: cannot create directory symlinks here ("
+                  << ec.message() << ")\n";
         return;
     }
 
@@ -189,7 +193,8 @@ TEST_CASE("FileSearcher: a Windows junction cycle does not cause an endless scan
         "cmd /c mklink /J \"" + link.string() + "\" \"" + tree.root().string() + "\" >nul 2>&1";
     const int result = std::system(command.c_str());
     if (result != 0 || !fs::exists(link)) {
-        MESSAGE("skipped: cannot create a junction here (exit code " << result << ")");
+        std::cout << "[ skip ] junction cycle test: cannot create a junction here (exit code "
+                  << result << ")\n";
         return;
     }
     LinkCleanup cleanup{link};
