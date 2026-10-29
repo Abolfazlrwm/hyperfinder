@@ -28,6 +28,9 @@ endif()
 
 find_package(Threads REQUIRED)
 
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
 # ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
@@ -86,8 +89,15 @@ add_library(hyperfinder_core STATIC
     src/thread_pool.cpp
 )
 add_library(hyperfinder::core ALIAS hyperfinder_core)
+# Aliases are never exported, so the installed package would otherwise expose
+# hyperfinder::hyperfinder_core. EXPORT_NAME makes the installed target
+# hyperfinder::core, matching the alias used inside this build.
+set_target_properties(hyperfinder_core PROPERTIES EXPORT_NAME core)
 
-target_include_directories(hyperfinder_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(hyperfinder_core PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
 target_compile_features(hyperfinder_core PUBLIC cxx_std_17)
 target_link_libraries(hyperfinder_core PUBLIC Threads::Threads)
 hyperfinder_set_warnings(hyperfinder_core)
@@ -106,3 +116,60 @@ if(HYPERFINDER_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# ---------------------------------------------------------------------------
+# Install rules and an exported package config
+# ---------------------------------------------------------------------------
+# Everything goes into the standard GNU directories, so the default prefix
+# (/usr/local) can be overridden with -DCMAKE_INSTALL_PREFIX. The export set
+# carries the hyperfinder:: namespace, which means a downstream project does:
+#
+#     find_package(hyperfinder REQUIRED)
+#     target_link_libraries(app PRIVATE hyperfinder::core)
+#
+# Both the library and the executable are installed, but only the library is
+# exported: a downstream project links against hyperfinder::core and has no
+# reason to reference the command-line tool as a build target.
+install(
+    TARGETS hyperfinder_core
+    EXPORT hyperfinderTargets
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(
+    TARGETS hyperfinder
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(DIRECTORY include/hyperfinder DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+install(
+    EXPORT hyperfinderTargets
+    FILE hyperfinderTargets.cmake
+    NAMESPACE hyperfinder::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hyperfinder
+)
+
+configure_package_config_file(
+    cmake/hyperfinderConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/hyperfinderConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hyperfinder
+)
+
+# SameMajorVersion: 0.x releases may break the API, so a consumer asking for
+# 0.1 must not silently get 0.2.
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/hyperfinderConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(
+    FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/hyperfinderConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/hyperfinderConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hyperfinder
+)
