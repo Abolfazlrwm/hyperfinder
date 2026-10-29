@@ -66,6 +66,11 @@ void FileSearcher::scanDirectory(const fs::path& path) {
 
     directoriesScanned.fetch_add(1);
 
+    // Matches found by this task. Collected locally and merged once by the
+    // caller, so a directory with many hits takes the results mutex once
+    // instead of once per match.
+    std::vector<std::string> found;
+
     const fs::directory_iterator end;
     while (it != end) {
         const fs::directory_entry& entry = *it;
@@ -84,8 +89,7 @@ void FileSearcher::scanDirectory(const fs::path& path) {
         } else if (fs::is_regular_file(link_status)) {
             filesScanned.fetch_add(1);
             if (containsQuery(entry.path().filename().string())) {
-                std::lock_guard<std::mutex> lock(results_mutex);
-                matches.push_back(entry.path().string());
+                found.push_back(entry.path().string());
             }
         }
 
@@ -94,6 +98,12 @@ void FileSearcher::scanDirectory(const fs::path& path) {
             skippedPaths.fetch_add(1);
             break;
         }
+    }
+
+    if (!found.empty()) {
+        std::lock_guard<std::mutex> lock(results_mutex);
+        matches.insert(matches.end(), std::make_move_iterator(found.begin()),
+                       std::make_move_iterator(found.end()));
     }
 }
 
