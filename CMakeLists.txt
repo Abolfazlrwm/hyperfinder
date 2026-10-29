@@ -11,6 +11,37 @@ find_package(Threads REQUIRED)
 # Options
 # ---------------------------------------------------------------------------
 option(HYPERFINDER_BUILD_TESTS "Build the test suite" ON)
+set(HYPERFINDER_SANITIZER "" CACHE STRING
+    "Build with a sanitizer: address, thread, undefined, or address,undefined")
+
+# ---------------------------------------------------------------------------
+# Sanitizers
+# ---------------------------------------------------------------------------
+# AddressSanitizer and UndefinedBehaviorSanitizer work with GCC and Clang on
+# Linux and macOS. MinGW ships none of the sanitizer runtimes (no libasan,
+# libubsan or libtsan), so the option is rejected up front instead of failing
+# at link time with "cannot find -lasan".
+if(HYPERFINDER_SANITIZER)
+    if(MSVC)
+        message(FATAL_ERROR
+            "HYPERFINDER_SANITIZER is not supported with MSVC; use GCC or Clang.")
+    endif()
+    if(NOT HYPERFINDER_SANITIZER MATCHES "^(address|thread|undefined|address,undefined)$")
+        message(FATAL_ERROR
+            "Unsupported HYPERFINDER_SANITIZER='${HYPERFINDER_SANITIZER}'. "
+            "Use address, thread, undefined, or address,undefined.")
+    endif()
+    if(MINGW)
+        message(FATAL_ERROR
+            "MinGW does not ship the sanitizer runtimes, so HYPERFINDER_SANITIZER "
+            "cannot be used here. Build with GCC or Clang on Linux or macOS "
+            "(the CI sanitizer job does exactly that).")
+    endif()
+
+    add_compile_options(-fsanitize=${HYPERFINDER_SANITIZER} -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=${HYPERFINDER_SANITIZER})
+    message(STATUS "Sanitizer enabled: ${HYPERFINDER_SANITIZER}")
+endif()
 
 # ---------------------------------------------------------------------------
 # Strict warnings: the project is expected to build without a single one.
