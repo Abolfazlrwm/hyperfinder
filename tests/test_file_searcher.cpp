@@ -1,6 +1,6 @@
 #include "doctest/doctest.h"
 
-#include "file_searcher.h"
+#include <hyperfinder/file_searcher.h>
 #include "reference.hpp"
 #include "temp_tree.hpp"
 

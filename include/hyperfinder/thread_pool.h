@@ -1,5 +1,5 @@
-#ifndef THREAD_POOL_H
-#define THREAD_POOL_H
+#ifndef HYPERFINDER_THREAD_POOL_H
+#define HYPERFINDER_THREAD_POOL_H
 
 #include <vector>
 #include <queue>
@@ -77,4 +77,4 @@ auto ThreadPool::enqueue(F&& f, Args&&... args) -> std::future<std::invoke_resul
     return res;
 }
 
-#endif
+#endif  // HYPERFINDER_THREAD_POOL_H

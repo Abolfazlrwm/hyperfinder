@@ -1,4 +1,4 @@
-#include "thread_pool.h"
+#include <hyperfinder/thread_pool.h>
 
 ThreadPool::ThreadPool(size_t threads) : stop(false) {
     if (threads == 0) threads = 1;  // a pool without workers would never drain
