@@ -83,7 +83,10 @@ add_library(hyperfinder_core STATIC
     src/file_searcher.cpp
     src/thread_pool.cpp
 )
+add_library(hyperfinder::core ALIAS hyperfinder_core)
+
 target_include_directories(hyperfinder_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(hyperfinder_core PUBLIC cxx_std_17)
 target_link_libraries(hyperfinder_core PUBLIC Threads::Threads)
 hyperfinder_set_warnings(hyperfinder_core)
 
@@ -91,7 +94,7 @@ hyperfinder_set_warnings(hyperfinder_core)
 # Command-line front end
 # ---------------------------------------------------------------------------
 add_executable(hyperfinder src/main.cpp)
-target_link_libraries(hyperfinder PRIVATE hyperfinder_core)
+target_link_libraries(hyperfinder PRIVATE hyperfinder::core)
 hyperfinder_set_warnings(hyperfinder)
 
 # ---------------------------------------------------------------------------
