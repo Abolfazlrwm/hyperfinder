@@ -25,7 +25,7 @@ add_executable(hyperfinder_tests
     test_file_searcher.cpp
     test_stress.cpp
 )
-target_link_libraries(hyperfinder_tests PRIVATE hyperfinder_core doctest::doctest)
+target_link_libraries(hyperfinder_tests PRIVATE hyperfinder::core doctest::doctest)
 hyperfinder_set_warnings(hyperfinder_tests)
 
 add_test(NAME hyperfinder_tests COMMAND hyperfinder_tests)

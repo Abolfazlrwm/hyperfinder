@@ -13,6 +13,7 @@ obj/
 
 # CMake leftovers
 CMakeCache.txt
+CMakeUserPresets.json
 CMakeFiles/
 CMakeScripts/
 cmake_install.cmake
@@ -21,6 +22,8 @@ Testing/
 compile_commands.json
 install_manifest.txt
 *.cmake.in
+# ... except the package config template, which is source, not generated.
+!cmake/*.cmake.in
 Makefile
 *.ninja
 .ninja_deps

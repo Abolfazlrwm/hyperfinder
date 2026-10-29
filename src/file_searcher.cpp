@@ -1,4 +1,4 @@
-#include "file_searcher.h"
+#include <hyperfinder/file_searcher.h>
 #include <algorithm>
 #include <cctype>
 #include <iostream>

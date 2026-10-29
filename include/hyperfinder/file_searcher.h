@@ -1,5 +1,5 @@
-#ifndef FILE_SEARCHER_H
-#define FILE_SEARCHER_H
+#ifndef HYPERFINDER_FILE_SEARCHER_H
+#define HYPERFINDER_FILE_SEARCHER_H
 
 #include <string>
 #include <vector>
@@ -8,7 +8,7 @@
 #include <atomic>
 #include <cstdint>
 #include <exception>
-#include "thread_pool.h"
+#include <hyperfinder/thread_pool.h>
 
 namespace fs = std::filesystem;
 
@@ -58,4 +58,4 @@ private:
     ThreadPool pool;
 };
 
-#endif
+#endif  // HYPERFINDER_FILE_SEARCHER_H

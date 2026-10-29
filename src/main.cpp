@@ -3,7 +3,7 @@
 #include <iostream>
 #include <string>
 
-#include "file_searcher.h"
+#include <hyperfinder/file_searcher.h>
 
 namespace {
 

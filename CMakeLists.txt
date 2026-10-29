@@ -1,18 +1,45 @@
-cmake_minimum_required(VERSION 3.16)
-project(hyperfinder VERSION 0.1.0 LANGUAGES CXX)
+# 3.21 is the floor because CMakePresets.json uses format version 3, which
+# CMake older than 3.21 cannot read.
+cmake_minimum_required(VERSION 3.21)
+
+project(hyperfinder
+    VERSION 0.1.0
+    DESCRIPTION "Multi-threaded file finder"
+    HOMEPAGE_URL "https://github.com/Abolfazlrwm/hyperfinder"
+    LANGUAGES CXX
+)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Single-config generators (Makefiles, Ninja) leave CMAKE_BUILD_TYPE empty when
+# the user does not pass one, which silently produces an unoptimised binary
+# with no debug information either. Default to Release so that a plain
+# "cmake -S . -B build && cmake --build build" does the obvious thing.
+# Multi-config generators (Visual Studio, Xcode) choose the configuration at
+# build time instead and are left alone.
+get_property(HYPERFINDER_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT HYPERFINDER_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING
+        "Build type: Debug, Release, RelWithDebInfo or MinSizeRel" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+        Debug Release RelWithDebInfo MinSizeRel)
+    message(STATUS "No build type specified, defaulting to Release")
+endif()
+
 find_package(Threads REQUIRED)
+
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 # ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
 option(HYPERFINDER_BUILD_TESTS "Build the test suite" ON)
-set(HYPERFINDER_SANITIZER "" CACHE STRING
-    "Build with a sanitizer: address, thread, undefined, or address,undefined")
+option(HYPERFINDER_ENABLE_SANITIZERS "Build with the sanitizers below" OFF)
+set(HYPERFINDER_SANITIZER "address,undefined" CACHE STRING
+    "Which sanitizers to enable: address, thread, undefined, or address,undefined")
 
 # ---------------------------------------------------------------------------
 # Sanitizers
@@ -21,10 +48,11 @@ set(HYPERFINDER_SANITIZER "" CACHE STRING
 # Linux and macOS. MinGW ships none of the sanitizer runtimes (no libasan,
 # libubsan or libtsan), so the option is rejected up front instead of failing
 # at link time with "cannot find -lasan".
-if(HYPERFINDER_SANITIZER)
+if(HYPERFINDER_ENABLE_SANITIZERS)
     if(MSVC)
         message(FATAL_ERROR
-            "HYPERFINDER_SANITIZER is not supported with MSVC; use GCC or Clang.")
+            "HYPERFINDER_ENABLE_SANITIZERS is not supported with MSVC; "
+            "use GCC or Clang.")
     endif()
     if(NOT HYPERFINDER_SANITIZER MATCHES "^(address|thread|undefined|address,undefined)$")
         message(FATAL_ERROR
@@ -33,14 +61,14 @@ if(HYPERFINDER_SANITIZER)
     endif()
     if(MINGW)
         message(FATAL_ERROR
-            "MinGW does not ship the sanitizer runtimes, so HYPERFINDER_SANITIZER "
-            "cannot be used here. Build with GCC or Clang on Linux or macOS "
-            "(the CI sanitizer job does exactly that).")
+            "MinGW does not ship the sanitizer runtimes, so "
+            "HYPERFINDER_ENABLE_SANITIZERS cannot be used here. Build with GCC "
+            "or Clang on Linux or macOS (the CI sanitizer job does exactly that).")
     endif()
 
     add_compile_options(-fsanitize=${HYPERFINDER_SANITIZER} -fno-omit-frame-pointer -g)
     add_link_options(-fsanitize=${HYPERFINDER_SANITIZER})
-    message(STATUS "Sanitizer enabled: ${HYPERFINDER_SANITIZER}")
+    message(STATUS "Sanitizers enabled: ${HYPERFINDER_SANITIZER}")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -62,7 +90,17 @@ add_library(hyperfinder_core STATIC
     src/file_searcher.cpp
     src/thread_pool.cpp
 )
-target_include_directories(hyperfinder_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+add_library(hyperfinder::core ALIAS hyperfinder_core)
+# Aliases are never exported, so the installed package would otherwise expose
+# hyperfinder::hyperfinder_core. EXPORT_NAME makes the installed target
+# hyperfinder::core, matching the alias used inside this build.
+set_target_properties(hyperfinder_core PROPERTIES EXPORT_NAME core)
+
+target_include_directories(hyperfinder_core PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+target_compile_features(hyperfinder_core PUBLIC cxx_std_17)
 target_link_libraries(hyperfinder_core PUBLIC Threads::Threads)
 hyperfinder_set_warnings(hyperfinder_core)
 
@@ -70,7 +108,7 @@ hyperfinder_set_warnings(hyperfinder_core)
 # Command-line front end
 # ---------------------------------------------------------------------------
 add_executable(hyperfinder src/main.cpp)
-target_link_libraries(hyperfinder PRIVATE hyperfinder_core)
+target_link_libraries(hyperfinder PRIVATE hyperfinder::core)
 hyperfinder_set_warnings(hyperfinder)
 
 # ---------------------------------------------------------------------------
@@ -80,3 +118,60 @@ if(HYPERFINDER_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# ---------------------------------------------------------------------------
+# Install rules and an exported package config
+# ---------------------------------------------------------------------------
+# Everything goes into the standard GNU directories, so the default prefix
+# (/usr/local) can be overridden with -DCMAKE_INSTALL_PREFIX. The export set
+# carries the hyperfinder:: namespace, which means a downstream project does:
+#
+#     find_package(hyperfinder REQUIRED)
+#     target_link_libraries(app PRIVATE hyperfinder::core)
+#
+# Both the library and the executable are installed, but only the library is
+# exported: a downstream project links against hyperfinder::core and has no
+# reason to reference the command-line tool as a build target.
+install(
+    TARGETS hyperfinder_core
+    EXPORT hyperfinderTargets
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(
+    TARGETS hyperfinder
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(DIRECTORY include/hyperfinder DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+install(
+    EXPORT hyperfinderTargets
+    FILE hyperfinderTargets.cmake
+    NAMESPACE hyperfinder::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hyperfinder
+)
+
+configure_package_config_file(
+    cmake/hyperfinderConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/hyperfinderConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hyperfinder
+)
+
+# SameMajorVersion: 0.x releases may break the API, so a consumer asking for
+# 0.1 must not silently get 0.2.
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/hyperfinderConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(
+    FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/hyperfinderConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/hyperfinderConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hyperfinder
+)

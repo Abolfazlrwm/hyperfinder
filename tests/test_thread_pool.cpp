@@ -1,5 +1,5 @@
 #include "doctest/doctest.h"
-#include "thread_pool.h"
+#include <hyperfinder/thread_pool.h>
 
 #include <atomic>
 #include <stdexcept>
