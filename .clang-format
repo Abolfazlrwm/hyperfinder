@@ -1,0 +1,61 @@
+---
+# hyperfinder code style.
+# Applied by: clang-format -i <files>
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++17
+
+# Layout
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+BreakBeforeBraces: Attach
+
+# Pointers and references: std::string& value
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+# Includes: sorted, grouped, one per line
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve
+IncludeCategories:
+  - Regex: '^<.*\.h>'
+    Priority: 1
+  - Regex: '^<.*>'
+    Priority: 2
+  - Regex: '^"hyperfinder/.*"'
+    Priority: 3
+  - Regex: '^".*"'
+    Priority: 4
+
+# Functions
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortLambdasOnASingleLine: Inline
+AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments: false
+BinPackParameters: false
+SeparateDefinitionBlocks: Always
+SpaceAfterTemplateKeyword: false
+SpaceBeforeCpp11BracedList: false
+
+# Alignment
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignEscapedNewlines: Left
+AlignOperands: AlignAfterOperator
+AlignTrailingComments: true
+
+# Namespaces
+NamespaceIndentation: None
+FixNamespaceComments: true
+
+# Misc
+ReflowComments: true
+SpacesBeforeTrailingComments: 2
+MaxEmptyLinesToKeep: 1

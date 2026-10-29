@@ -1,0 +1,84 @@
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+build/
+build-*/
+out/
+cmake-build-*/
+_build/
+install/
+bin/
+lib/
+obj/
+
+# CMake leftovers
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+install_manifest.txt
+*.cmake.in
+Makefile
+*.ninja
+.ninja_deps
+.ninja_log
+
+# ---------------------------------------------------------------------------
+# Binaries and artifacts
+# ---------------------------------------------------------------------------
+*.exe
+*.dll
+*.so
+*.so.*
+*.dylib
+*.a
+*.lib
+*.o
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.out
+*.app/
+
+# ---------------------------------------------------------------------------
+# Test / coverage / sanitizer output
+# ---------------------------------------------------------------------------
+*.gcda
+*.gcno
+*.gcov
+coverage/
+*.profraw
+*.profdata
+*.log
+
+# ---------------------------------------------------------------------------
+# Benchmark scratch data
+# ---------------------------------------------------------------------------
+benchmarks/.data/
+benchmarks/results/*.tmp
+
+# ---------------------------------------------------------------------------
+# Editors and IDEs
+# ---------------------------------------------------------------------------
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.swp
+*.swo
+*~
+.clangd/
+.cache/
+
+# ---------------------------------------------------------------------------
+# OS noise
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
