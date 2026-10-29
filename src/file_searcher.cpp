@@ -18,6 +18,14 @@
 
 namespace {
 
+// ASCII lower-casing, byte by byte. std::tolower must be given an unsigned
+// char value; passing a negative char is undefined behaviour.
+std::string toLower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
 // True when the entry is a directory link rather than a real directory.
 //
 // On Windows, libstdc++ implements symlink_status() by querying the target, so
@@ -45,11 +53,6 @@ bool is_directory_link(const fs::directory_entry& entry, const fs::file_status& 
 FileSearcher::FileSearcher(const std::string& q, const fs::path& root) 
     : query(toLower(q)), rootPath(root) {}
 
-std::string FileSearcher::toLower(std::string s) const {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return std::tolower(c); });
-    return s;
-}
-
 bool FileSearcher::containsQuery(const std::string& filename) const {
     return toLower(filename).find(query) != std::string::npos;
 }
@@ -67,8 +70,8 @@ void FileSearcher::scanDirectory(const fs::path& path) {
 
     directoriesScanned.fetch_add(1);
 
-    // Matches found by this task. Collected locally and merged once by the
-    // caller, so a directory with many hits takes the results mutex once
+    // Matches found by this task, merged under one lock when the directory is
+    // finished, so a directory with many hits takes the results mutex once
     // instead of once per match.
     std::vector<std::string> found;
 

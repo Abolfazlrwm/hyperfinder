@@ -38,7 +38,6 @@ private:
     void submit(const fs::path& path);
     void recordError(std::exception_ptr error);
     bool containsQuery(const std::string& filename) const;
-    std::string toLower(std::string s) const;
 
     std::string query;
     fs::path rootPath;
