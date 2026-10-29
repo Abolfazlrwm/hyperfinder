@@ -8,6 +8,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Threads REQUIRED)
 
 # ---------------------------------------------------------------------------
+# Options
+# ---------------------------------------------------------------------------
+option(HYPERFINDER_BUILD_TESTS "Build the test suite" ON)
+
+# ---------------------------------------------------------------------------
 # Strict warnings: the project is expected to build without a single one.
 # ---------------------------------------------------------------------------
 function(hyperfinder_set_warnings target)
@@ -36,3 +41,11 @@ hyperfinder_set_warnings(hyperfinder_core)
 add_executable(hyperfinder src/main.cpp)
 target_link_libraries(hyperfinder PRIVATE hyperfinder_core)
 hyperfinder_set_warnings(hyperfinder)
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+if(HYPERFINDER_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
