@@ -36,9 +36,10 @@ void FileSearcher::scanDirectory(const fs::path& path) {
 }
 
 void FileSearcher::search() {
-    scanDirectory(rootPath);
-    // در اینجا باید کمی صبر کرد یا از مکانیزم شمارش تسک‌ها استفاده کرد
-    // برای سادگی و کارایی، تخریب ThreadPool در پایان کلاس تضمین می‌کند کارها تمام شده‌اند.
+    pool.enqueue([this, root = rootPath] { scanDirectory(root); });
+    // Every directory task spawns further tasks for its subdirectories, so the
+    // pool is only idle once the whole tree has been visited.
+    pool.waitIdle();
 }
 
 void FileSearcher::displayResults() const {
