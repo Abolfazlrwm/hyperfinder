@@ -1,43 +1,48 @@
-#include <iostream>
 #include <chrono>
+#include <exception>
+#include <iostream>
+#include <string>
+
 #include "file_searcher.h"
 
-int main(int argc, char *argv[])
-{
-    if (argc < 3)
-    {
-        std::cerr << "Usage: " << argv[0] << " <search_term> <directory_path>\n";
+namespace {
+
+void printUsage(const char* program) {
+    std::cerr << "Usage: " << program << " <search_term> <directory_path>\n";
+}
+
+}  // namespace
+
+int main(int argc, char* argv[]) {
+    if (argc != 3) {
+        printUsage(argv[0]);
         return 1;
     }
 
-    std::string searchTerm = argv[1];
-    std::string searchPath = argv[2];
+    try {
+        const std::string searchTerm = argv[1];
+        const fs::path searchPath = argv[2];
 
-    try
-    {
-        std::cout << "Scanning files...\n";
-        auto start = std::chrono::high_resolution_clock::now();
+        std::cout << "Scanning " << searchPath.string() << " for \"" << searchTerm << "\"...\n";
 
         FileSearcher searcher(searchTerm, searchPath);
+
+        // search() returns only when every worker has finished, so this
+        // interval covers the whole scan. steady_clock cannot jump backwards.
+        const auto start = std::chrono::steady_clock::now();
         searcher.search();
-
-        // منتظر می‌مانیم تا Thread Pool کارش تمام شود (در اینجا تخریب آبجکت اتفاق می‌افتد)
-        // در یک پروژه واقعی‌تر، از یک Wait Group استفاده می‌کنیم.
-
-        auto end = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> elapsed = end - start;
+        const auto finish = std::chrono::steady_clock::now();
+        const std::chrono::duration<double> elapsed = finish - start;
 
         searcher.displayResults();
 
+        const SearchStats stats = searcher.stats();
         std::cout << "\n----------------------------------------\n";
         std::cout << "Scan completed in " << elapsed.count() << " seconds\n";
-        const SearchStats stats = searcher.stats();
         std::cout << "Files scanned: " << stats.files_scanned << "\n";
         std::cout << "Directories scanned: " << stats.directories_scanned << "\n";
         std::cout << "Paths skipped: " << stats.paths_skipped << "\n";
-    }
-    catch (const std::exception &e)
-    {
+    } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
         return 1;
     }

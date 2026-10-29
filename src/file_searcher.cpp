@@ -149,17 +149,22 @@ void FileSearcher::search() {
     pool.waitIdle();
 
     if (firstError) std::rethrow_exception(firstError);
+
+    // Worker threads finish in an unpredictable order, so the raw result order
+    // changes from run to run. Sort once here; no task is running any more.
+    std::sort(matches.begin(), matches.end());
 }
 
 void FileSearcher::displayResults() const {
     std::lock_guard<std::mutex> lock(results_mutex);
     if (matches.empty()) {
         std::cout << "\nNo matches found.\n";
-    } else {
-        std::cout << "\nFound matches:\n";
-        for (const auto& path : matches) {
-            std::cout << path << "\n";
-        }
+        return;
+    }
+    std::cout << "\nFound " << matches.size() << " match" << (matches.size() == 1 ? "" : "es")
+              << ":\n";
+    for (const auto& path : matches) {
+        std::cout << path << "\n";
     }
 }
 
