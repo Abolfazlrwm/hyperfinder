@@ -13,6 +13,7 @@ obj/
 
 # CMake leftovers
 CMakeCache.txt
+CMakeUserPresets.json
 CMakeFiles/
 CMakeScripts/
 cmake_install.cmake

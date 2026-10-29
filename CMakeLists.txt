@@ -1,4 +1,6 @@
-cmake_minimum_required(VERSION 3.16)
+# 3.21 is the floor because CMakePresets.json uses format version 3, which
+# CMake older than 3.21 cannot read.
+cmake_minimum_required(VERSION 3.21)
 
 project(hyperfinder
     VERSION 0.1.0
