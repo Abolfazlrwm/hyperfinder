@@ -82,3 +82,8 @@ benchmarks/results/*.tmp
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ---------------------------------------------------------------------------
+# Local assistant/workspace state (never part of the project)
+# ---------------------------------------------------------------------------
+.workbuddy-ai/
