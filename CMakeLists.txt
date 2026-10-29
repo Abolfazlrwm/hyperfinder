@@ -32,8 +32,9 @@ find_package(Threads REQUIRED)
 # Options
 # ---------------------------------------------------------------------------
 option(HYPERFINDER_BUILD_TESTS "Build the test suite" ON)
-set(HYPERFINDER_SANITIZER "" CACHE STRING
-    "Build with a sanitizer: address, thread, undefined, or address,undefined")
+option(HYPERFINDER_ENABLE_SANITIZERS "Build with the sanitizers below" OFF)
+set(HYPERFINDER_SANITIZER "address,undefined" CACHE STRING
+    "Which sanitizers to enable: address, thread, undefined, or address,undefined")
 
 # ---------------------------------------------------------------------------
 # Sanitizers
@@ -42,10 +43,11 @@ set(HYPERFINDER_SANITIZER "" CACHE STRING
 # Linux and macOS. MinGW ships none of the sanitizer runtimes (no libasan,
 # libubsan or libtsan), so the option is rejected up front instead of failing
 # at link time with "cannot find -lasan".
-if(HYPERFINDER_SANITIZER)
+if(HYPERFINDER_ENABLE_SANITIZERS)
     if(MSVC)
         message(FATAL_ERROR
-            "HYPERFINDER_SANITIZER is not supported with MSVC; use GCC or Clang.")
+            "HYPERFINDER_ENABLE_SANITIZERS is not supported with MSVC; "
+            "use GCC or Clang.")
     endif()
     if(NOT HYPERFINDER_SANITIZER MATCHES "^(address|thread|undefined|address,undefined)$")
         message(FATAL_ERROR
@@ -54,14 +56,14 @@ if(HYPERFINDER_SANITIZER)
     endif()
     if(MINGW)
         message(FATAL_ERROR
-            "MinGW does not ship the sanitizer runtimes, so HYPERFINDER_SANITIZER "
-            "cannot be used here. Build with GCC or Clang on Linux or macOS "
-            "(the CI sanitizer job does exactly that).")
+            "MinGW does not ship the sanitizer runtimes, so "
+            "HYPERFINDER_ENABLE_SANITIZERS cannot be used here. Build with GCC "
+            "or Clang on Linux or macOS (the CI sanitizer job does exactly that).")
     endif()
 
     add_compile_options(-fsanitize=${HYPERFINDER_SANITIZER} -fno-omit-frame-pointer -g)
     add_link_options(-fsanitize=${HYPERFINDER_SANITIZER})
-    message(STATUS "Sanitizer enabled: ${HYPERFINDER_SANITIZER}")
+    message(STATUS "Sanitizers enabled: ${HYPERFINDER_SANITIZER}")
 endif()
 
 # ---------------------------------------------------------------------------
