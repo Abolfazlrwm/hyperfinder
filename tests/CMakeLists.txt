@@ -180,3 +180,16 @@ hyperfinder_cli_test(cli_color_never
     CODE 0 ARGS --color=never|a.txt|${HYPERFINDER_CLI_FIXTURE}
     STDOUT "a\\.txt" UNEXPECT_STDOUT "${hyperfinder_escape}")
 
+# ---------------------------------------------------------------------------
+# Step -1: a MinGW build must not need MinGW DLLs on PATH.
+# Only meaningful where we actually use the MinGW toolchain (CI uses MSVC, so
+# this guards the local builds and any MinGW CI run).
+# ---------------------------------------------------------------------------
+if(MINGW AND HYPERFINDER_STATIC_RUNTIME)
+    add_test(NAME cli_static_runtime
+        COMMAND ${CMAKE_COMMAND}
+                -DEXE=$<TARGET_FILE:hyperfinder>
+                -DSTATIC_RUNTIME=${HYPERFINDER_STATIC_RUNTIME}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/check_mingw_runtime.cmake)
+endif()
+

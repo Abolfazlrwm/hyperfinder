@@ -60,6 +60,18 @@ FetchContent_MakeAvailable(cli11)
 # ---------------------------------------------------------------------------
 option(HYPERFINDER_BUILD_TESTS "Build the test suite" ON)
 option(HYPERFINDER_ENABLE_SANITIZERS "Build with the sanitizers below" OFF)
+
+# Link the C++ runtime statically on MinGW. The default MinGW build depends on
+# libstdc++-6.dll, libgcc_s_seh-1.dll and libwinpthread-1.dll, and if an older
+# 32-bit MinGW sits earlier on PATH than the 64-bit toolchain, the 64-bit exe
+# loads the wrong DLL and exits with 0xC000007B before printing anything. Static
+# linking removes that whole class of failure; other toolchains don't ship those
+# DLLs, so the option is off there (and MSVC uses /MT only when asked).
+set(HYPERFINDER_STATIC_RUNTIME_DEFAULT OFF)
+if(MINGW)
+    set(HYPERFINDER_STATIC_RUNTIME_DEFAULT ON)
+endif()
+option(HYPERFINDER_STATIC_RUNTIME "Statically link the MinGW C++ runtime (no MinGW DLLs needed)" ${HYPERFINDER_STATIC_RUNTIME_DEFAULT})
 set(HYPERFINDER_SANITIZER "address,undefined" CACHE STRING
     "Which sanitizers to enable: address, thread, undefined, or address,undefined")
 
@@ -146,6 +158,12 @@ target_link_libraries(hyperfinder PRIVATE hyperfinder::core)
 # CommandLineToArgvW, used to read the UTF-16 command line on Windows.
 if(WIN32)
     target_link_libraries(hyperfinder PRIVATE shell32)
+endif()
+# On MinGW, pull the C++ runtime into the binary so it runs on a machine that
+# has no MinGW on PATH. -static also drags in winpthread, which the threads
+# support needs on some MinGW builds.
+if(MINGW AND HYPERFINDER_STATIC_RUNTIME)
+    target_link_options(hyperfinder PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
 hyperfinder_set_warnings(hyperfinder)
 
