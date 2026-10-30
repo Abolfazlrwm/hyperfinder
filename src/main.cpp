@@ -2,30 +2,23 @@
 #include <exception>
 #include <iostream>
 #include <string>
+#include <vector>
 
+#include <hyperfinder/cli.h>
 #include <hyperfinder/file_searcher.h>
 
-namespace {
-
-void printUsage(const char* program) {
-    std::cerr << "Usage: " << program << " <search_term> <directory_path>\n";
-}
-
-}  // namespace
-
 int main(int argc, char* argv[]) {
-    if (argc != 3) {
-        printUsage(argv[0]);
-        return 1;
+    const std::vector<std::string> args(argv, argv + argc);
+    const hyperfinder::ParseResult parsed = hyperfinder::parseArguments(args);
+
+    if (!parsed.should_run) {
+        std::cout << parsed.stdout_text;
+        std::cerr << parsed.stderr_text;
+        return parsed.exit_code;
     }
 
     try {
-        const std::string searchTerm = argv[1];
-        const fs::path searchPath = argv[2];
-
-        std::cout << "Scanning " << searchPath.string() << " for \"" << searchTerm << "\"...\n";
-
-        FileSearcher searcher(searchTerm, searchPath);
+        hyperfinder::FileSearcher searcher(parsed.options);
 
         // search() returns only when every worker has finished, so this
         // interval covers the whole scan. steady_clock cannot jump backwards.
@@ -36,7 +29,7 @@ int main(int argc, char* argv[]) {
 
         searcher.displayResults();
 
-        const SearchStats stats = searcher.stats();
+        const hyperfinder::SearchStats stats = searcher.stats();
         std::cout << "\n----------------------------------------\n";
         std::cout << "Scan completed in " << elapsed.count() << " seconds\n";
         std::cout << "Files scanned: " << stats.files_scanned << "\n";
@@ -44,7 +37,7 @@ int main(int argc, char* argv[]) {
         std::cout << "Paths skipped: " << stats.paths_skipped << "\n";
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
-        return 1;
+        return 2;
     }
 
     return 0;

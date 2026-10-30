@@ -8,7 +8,10 @@
 #include <atomic>
 #include <cstdint>
 #include <exception>
+#include <hyperfinder/options.h>
 #include <hyperfinder/thread_pool.h>
+
+namespace hyperfinder {
 
 namespace fs = std::filesystem;
 
@@ -22,6 +25,11 @@ struct SearchStats {
 
 class FileSearcher {
 public:
+    // The full configuration, as produced by the command-line layer.
+    explicit FileSearcher(Options options);
+
+    // Convenience overload for the common case; everything else keeps its
+    // default.
     FileSearcher(const std::string& query, const fs::path& root);
 
     // Scans the tree and returns only after every spawned task has finished.
@@ -44,6 +52,12 @@ private:
     void recordError(std::exception_ptr error);
     bool containsQuery(const std::string& filename) const;
 
+    // Declared before the members that read it, because member initialisation
+    // follows declaration order.
+    Options options;
+
+    // options.query, lower-cased once when ignore_case is on, so the hot path
+    // does not re-fold the needle for every file.
     std::string query;
     fs::path rootPath;
     std::vector<std::string> matches;
@@ -57,5 +71,7 @@ private:
     std::exception_ptr firstError;
     ThreadPool pool;
 };
+
+}  // namespace hyperfinder
 
 #endif  // HYPERFINDER_FILE_SEARCHER_H

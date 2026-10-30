@@ -23,6 +23,7 @@ add_executable(hyperfinder_tests
     reference.cpp
     test_thread_pool.cpp
     test_file_searcher.cpp
+    test_cli.cpp
     test_stress.cpp
 )
 target_link_libraries(hyperfinder_tests PRIVATE hyperfinder::core doctest::doctest)

@@ -10,6 +10,7 @@
 using hf_test::describeDifference;
 using hf_test::padded;
 using hf_test::TempTree;
+using hyperfinder::FileSearcher;
 
 namespace {
 

@@ -18,6 +18,8 @@
 
 namespace {
 
+namespace fs = std::filesystem;
+
 // ASCII lower-casing, byte by byte. std::tolower must be given an unsigned
 // char value; passing a negative char is undefined behaviour.
 std::string toLower(std::string value) {
@@ -50,15 +52,29 @@ bool is_directory_link(const fs::directory_entry& entry, const fs::file_status& 
 
 }  // namespace
 
-FileSearcher::FileSearcher(const std::string& q, const fs::path& root) 
-    : query(toLower(q)), rootPath(root) {
+namespace hyperfinder {
+
+FileSearcher::FileSearcher(Options opts)
+    : options(std::move(opts)),
+      query(options.ignore_case ? toLower(options.query) : options.query),
+      rootPath(fs::u8path(options.root)),
+      pool(options.threads == 0 ? ThreadPool::defaultThreadCount() : options.threads) {
     // Normalise the separator style once, at the root. std::filesystem appends
     // the native separator to whatever form the parent path already has, so a
     // root written as "C:/data" produced results like "C:/data\sub\file.txt".
     rootPath.make_preferred();
 }
 
+FileSearcher::FileSearcher(const std::string& q, const fs::path& root)
+    : FileSearcher([&q, &root] {
+          Options opts;
+          opts.query = q;
+          opts.root = root.u8string();
+          return opts;
+      }()) {}
+
 bool FileSearcher::containsQuery(const std::string& filename) const {
+    if (!options.ignore_case) return filename.find(query) != std::string::npos;
     return toLower(filename).find(query) != std::string::npos;
 }
 
@@ -97,8 +113,8 @@ void FileSearcher::scanDirectory(const fs::path& path) {
             }
         } else if (fs::is_regular_file(link_status)) {
             filesScanned.fetch_add(1);
-            if (containsQuery(entry.path().filename().string())) {
-                found.push_back(entry.path().string());
+            if (containsQuery(entry.path().filename().u8string())) {
+                found.push_back(entry.path().u8string());
             }
         }
 
@@ -137,7 +153,7 @@ void FileSearcher::recordError(std::exception_ptr error) {
 void FileSearcher::search() {
     std::error_code root_ec;
     if (!fs::is_directory(rootPath, root_ec)) {
-        throw std::runtime_error("cannot scan '" + rootPath.string() + "': not a directory");
+        throw std::runtime_error("cannot scan '" + rootPath.u8string() + "': not a directory");
     }
 
     {
@@ -196,3 +212,5 @@ std::uint64_t FileSearcher::getScannedCount() const {
 std::uint64_t FileSearcher::getSkippedCount() const {
     return skippedPaths.load();
 }
+
+}  // namespace hyperfinder
