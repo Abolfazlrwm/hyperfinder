@@ -29,9 +29,12 @@ std::vector<std::string> referenceMatches(const std::filesystem::path& root,
                 // default; the searcher never does.
                 it.disable_recursion_pending();
             } else if (fs::is_regular_file(status)) {
-                const std::string name = asciiLower(it->path().filename().string());
+                // u8string, not string: the fixture may contain Persian, accented
+                // or emoji names, and string() converts through the ANSI code page
+                // on Windows, which either throws or mangles them.
+                const std::string name = asciiLower(it->path().filename().u8string());
                 if (name.find(lowered) != std::string::npos) {
-                    found.push_back(it->path().string());
+                    found.push_back(it->path().u8string());
                 }
             }
         }

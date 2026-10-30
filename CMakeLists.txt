@@ -138,8 +138,15 @@ hyperfinder_set_warnings(hyperfinder_core)
 # ---------------------------------------------------------------------------
 # Command-line front end
 # ---------------------------------------------------------------------------
-add_executable(hyperfinder src/main.cpp)
+add_executable(hyperfinder
+    src/main.cpp
+    src/output.cpp
+)
 target_link_libraries(hyperfinder PRIVATE hyperfinder::core)
+# CommandLineToArgvW, used to read the UTF-16 command line on Windows.
+if(WIN32)
+    target_link_libraries(hyperfinder PRIVATE shell32)
+endif()
 hyperfinder_set_warnings(hyperfinder)
 
 # ---------------------------------------------------------------------------

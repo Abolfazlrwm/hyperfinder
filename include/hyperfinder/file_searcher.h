@@ -1,13 +1,16 @@
 #ifndef HYPERFINDER_FILE_SEARCHER_H
 #define HYPERFINDER_FILE_SEARCHER_H
 
-#include <string>
-#include <vector>
-#include <filesystem>
-#include <mutex>
 #include <atomic>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
+#include <mutex>
+#include <string>
+#include <string_view>
+#include <unordered_set>
+#include <vector>
+
 #include <hyperfinder/options.h>
 #include <hyperfinder/thread_pool.h>
 
@@ -21,8 +24,16 @@ struct SearchStats {
     std::uint64_t files_scanned = 0;
     std::uint64_t directories_scanned = 0;
     std::uint64_t paths_skipped = 0;
+
+    // Wall-clock duration of the last search(), measured around the scan only.
+    double elapsed_seconds = 0.0;
 };
 
+// Scans a directory tree and collects the paths that match.
+//
+// The class never writes to a stream. Everything it produces is returned
+// through results() and stats(), which keeps the search testable without
+// capturing stdout and lets the executable decide on formatting and colour.
 class FileSearcher {
 public:
     // The full configuration, as produced by the command-line layer.
@@ -36,8 +47,6 @@ public:
     // Throws if the root cannot be read or if a task failed unexpectedly.
     void search();
 
-    void displayResults() const;
-
     // Matches from the last search(), sorted. Safe to call once search() has
     // returned; not safe to call while a search is running.
     const std::vector<std::string>& results() const noexcept;
@@ -47,10 +56,16 @@ public:
     std::uint64_t getSkippedCount() const;
 
 private:
-    void scanDirectory(const fs::path& path);
-    void submit(const fs::path& path);
+    // depth is the level of `path` itself: 0 for the root, 1 for its children.
+    void scanDirectory(const fs::path& path, std::size_t depth);
+    void submit(const fs::path& path, std::size_t depth);
     void recordError(std::exception_ptr error);
     bool containsQuery(const std::string& filename) const;
+
+    // Returns true when `directory` was already reached during this search, and
+    // records it otherwise. Only used with follow_symlinks, where a link can
+    // point back at an ancestor.
+    bool markVisited(const fs::path& directory);
 
     // Declared before the members that read it, because member initialisation
     // follows declaration order.
@@ -66,9 +81,14 @@ private:
     std::atomic<std::uint64_t> filesScanned{0};
     std::atomic<std::uint64_t> directoriesScanned{0};
     std::atomic<std::uint64_t> skippedPaths{0};
+    std::atomic<double> elapsedSeconds{0.0};
 
     std::mutex error_mutex;
     std::exception_ptr firstError;
+
+    std::mutex visited_mutex;
+    std::unordered_set<std::string> visited_directories;
+
     ThreadPool pool;
 };
 

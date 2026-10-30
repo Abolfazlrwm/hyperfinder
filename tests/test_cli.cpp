@@ -156,8 +156,15 @@ TEST_CASE("--max-depth sets the depth limit") {
     CHECK(result.options.max_depth == 3);
 }
 
-TEST_CASE("--max-depth defaults to 0 (unlimited)") {
+TEST_CASE("--max-depth defaults to unlimited") {
     const auto result = parse({"needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.max_depth == hyperfinder::kUnlimitedDepth);
+}
+
+TEST_CASE("--max-depth 0 is a real depth, not 'unlimited'") {
+    const auto result = parse({"--max-depth", "0", "needle"});
 
     REQUIRE(result.should_run);
     CHECK(result.options.max_depth == 0);
@@ -193,8 +200,24 @@ TEST_CASE("--ext can be repeated and accepts no leading dot") {
 
     REQUIRE(result.should_run);
     REQUIRE(result.options.extensions.size() == 2);
-    CHECK(result.options.extensions[0] == "cpp");
-    CHECK(result.options.extensions[1] == "h");
+    CHECK(result.options.extensions[0] == ".cpp");
+    CHECK(result.options.extensions[1] == ".h");
+}
+
+TEST_CASE("--ext is normalised to a leading dot and lower case") {
+    const auto result = parse({"--ext", "CPP", "--ext", ".Txt", "needle"});
+
+    REQUIRE(result.should_run);
+    REQUIRE(result.options.extensions.size() == 2);
+    CHECK(result.options.extensions[0] == ".cpp");
+    CHECK(result.options.extensions[1] == ".txt");
+}
+
+TEST_CASE("an empty --ext is dropped rather than matching nothing") {
+    const auto result = parse({"--ext", "", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.extensions.empty());
 }
 
 TEST_CASE("--hidden enables hidden file traversal") {

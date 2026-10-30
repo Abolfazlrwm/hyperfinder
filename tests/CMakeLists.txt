@@ -24,6 +24,7 @@ add_executable(hyperfinder_tests
     test_match.cpp
     test_thread_pool.cpp
     test_file_searcher.cpp
+    test_filters.cpp
     test_cli.cpp
     test_stress.cpp
 )

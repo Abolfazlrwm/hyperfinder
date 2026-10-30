@@ -1,5 +1,7 @@
 #include <hyperfinder/cli.h>
 
+#include <hyperfinder/match.h>
+
 #include <CLI/CLI.hpp>
 
 #include <cstddef>
@@ -66,7 +68,7 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
     std::size_t threads = 0;
     bool ignore_case_flag = false;
     bool case_sensitive_flag = false;
-    std::size_t max_depth = 0;
+    std::size_t max_depth = kUnlimitedDepth;
     std::vector<std::string> exclude;
     std::vector<std::string> extensions;
     bool include_hidden = false;
@@ -91,10 +93,10 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
     ignore_case_option->excludes(case_sensitive_option);
     case_sensitive_option->excludes(ignore_case_option);
 
-    auto* depth_option = app.add_option(
+    app.add_option(
         "--max-depth", max_depth,
-        "Maximum directory depth to descend; 0 means unlimited (root is depth 0)");
-    depth_option->capture_default_str();
+        "Levels of directories to descend; 0 = the entries directly inside the "
+        "root only (default: unlimited)");
 
     app.add_option("--exclude", exclude,
                    "Glob pattern to exclude (matched against entry name); repeatable");
@@ -168,7 +170,14 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
     result.options.ignore_case = !case_sensitive_flag;
     result.options.max_depth = max_depth;
     result.options.exclude = std::move(exclude);
-    result.options.extensions = std::move(extensions);
+
+    // Normalise once here so the hot path only compares ready-made strings, and
+    // drop empties: "--ext ''" would otherwise silently match nothing.
+    for (const std::string& extension : extensions) {
+        std::string normalised = normalizeExtension(extension);
+        if (!normalised.empty()) result.options.extensions.push_back(std::move(normalised));
+    }
+
     result.options.include_hidden = include_hidden;
     result.options.follow_symlinks = follow_symlinks;
     result.options.count_only = count_only;
