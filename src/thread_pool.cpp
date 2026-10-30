@@ -1,5 +1,7 @@
 #include <hyperfinder/thread_pool.h>
 
+namespace hyperfinder {
+
 ThreadPool::ThreadPool(size_t threads) : stop(false) {
     if (threads == 0) threads = 1;  // a pool without workers would never drain
     workers.reserve(threads);
@@ -56,3 +58,5 @@ std::size_t ThreadPool::defaultThreadCount() noexcept {
     const unsigned detected = std::thread::hardware_concurrency();
     return detected == 0 ? 1U : static_cast<std::size_t>(detected);
 }
+
+}  // namespace hyperfinder

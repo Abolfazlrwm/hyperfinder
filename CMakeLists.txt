@@ -34,6 +34,28 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 # ---------------------------------------------------------------------------
+# Third-party dependencies
+# ---------------------------------------------------------------------------
+include(FetchContent)
+
+# Fetched over git rather than as a tarball: the CMake bundled with some MinGW
+# distributions has no CA trust store and fails the HTTPS download. That means
+# the git on PATH has to have one too - on Windows put Git for Windows ahead of
+# the WinLibs git.
+set(CLI11_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(CLI11_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CLI11_INSTALL OFF CACHE BOOL "" FORCE)
+set(CLI11_PRECOMPILED OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    cli11
+    GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
+    GIT_TAG v2.7.2
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(cli11)
+
+# ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
 option(HYPERFINDER_BUILD_TESTS "Build the test suite" ON)
@@ -87,7 +109,9 @@ endfunction()
 # against this, so they exercise exactly the code the executable ships.
 # ---------------------------------------------------------------------------
 add_library(hyperfinder_core STATIC
+    src/cli.cpp
     src/file_searcher.cpp
+    src/match.cpp
     src/thread_pool.cpp
 )
 add_library(hyperfinder::core ALIAS hyperfinder_core)
@@ -95,6 +119,13 @@ add_library(hyperfinder::core ALIAS hyperfinder_core)
 # hyperfinder::hyperfinder_core. EXPORT_NAME makes the installed target
 # hyperfinder::core, matching the alias used inside this build.
 set_target_properties(hyperfinder_core PROPERTIES EXPORT_NAME core)
+
+# CLI11 is header-only and used only from cli.cpp, so it stays PRIVATE and is
+# wrapped in BUILD_INTERFACE: an installed static library has no CLI11 symbols
+# left to resolve, and without the wrapper CMake insists on exporting the
+# CLI11 target as part of our package.
+target_compile_definitions(hyperfinder_core PRIVATE HYPERFINDER_VERSION="${PROJECT_VERSION}")
+target_link_libraries(hyperfinder_core PRIVATE $<BUILD_INTERFACE:CLI11::CLI11>)
 
 target_include_directories(hyperfinder_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -107,8 +138,15 @@ hyperfinder_set_warnings(hyperfinder_core)
 # ---------------------------------------------------------------------------
 # Command-line front end
 # ---------------------------------------------------------------------------
-add_executable(hyperfinder src/main.cpp)
+add_executable(hyperfinder
+    src/main.cpp
+    src/output.cpp
+)
 target_link_libraries(hyperfinder PRIVATE hyperfinder::core)
+# CommandLineToArgvW, used to read the UTF-16 command line on Windows.
+if(WIN32)
+    target_link_libraries(hyperfinder PRIVATE shell32)
+endif()
 hyperfinder_set_warnings(hyperfinder)
 
 # ---------------------------------------------------------------------------

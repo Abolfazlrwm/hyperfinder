@@ -34,7 +34,10 @@ TempTree::~TempTree() {
 }
 
 fs::path TempTree::makeDir(const std::string& relative) {
-    fs::path path = root_ / relative;
+    // u8path, not a plain string: the argument may hold a Persian or emoji name,
+    // and on Windows a narrow std::string is interpreted in the ANSI code page,
+    // which cannot represent those characters.
+    fs::path path = root_ / fs::u8path(relative);
     path.make_preferred();
 
     std::error_code ec;
@@ -44,7 +47,7 @@ fs::path TempTree::makeDir(const std::string& relative) {
 }
 
 fs::path TempTree::makeFile(const std::string& relative, const std::string& content) {
-    fs::path path = root_ / relative;
+    fs::path path = root_ / fs::u8path(relative);
     path.make_preferred();
 
     std::error_code ec;

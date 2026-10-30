@@ -12,6 +12,8 @@
 #include <cstddef>
 #include <stdexcept>
 
+namespace hyperfinder {
+
 // Fixed-size pool of worker threads executing queued tasks.
 //
 // The pool counts tasks that are queued or currently running. A task is
@@ -76,5 +78,7 @@ auto ThreadPool::enqueue(F&& f, Args&&... args) -> std::future<std::invoke_resul
     condition.notify_one();
     return res;
 }
+
+}  // namespace hyperfinder
 
 #endif  // HYPERFINDER_THREAD_POOL_H

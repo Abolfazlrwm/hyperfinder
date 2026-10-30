@@ -4,6 +4,8 @@
 #include <atomic>
 #include <stdexcept>
 
+using hyperfinder::ThreadPool;
+
 TEST_CASE("ThreadPool: waitIdle waits for every queued task") {
     ThreadPool pool(4);
     std::atomic<int> completed{0};

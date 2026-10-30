@@ -13,6 +13,10 @@
 using hf_test::describeDifference;
 using hf_test::padded;
 using hf_test::TempTree;
+using hyperfinder::FileSearcher;
+using hyperfinder::SearchStats;
+
+namespace fs = std::filesystem;
 
 namespace {
 
