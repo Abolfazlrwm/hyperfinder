@@ -21,6 +21,7 @@ add_executable(hyperfinder_tests
     doctest_main.cpp
     temp_tree.cpp
     reference.cpp
+    test_match.cpp
     test_thread_pool.cpp
     test_file_searcher.cpp
     test_cli.cpp
