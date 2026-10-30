@@ -98,11 +98,23 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
         "Levels of directories to descend; 0 = the entries directly inside the "
         "root only (default: unlimited)");
 
+    // expected(1) makes the option take exactly one value per occurrence,
+    // instead of greedily swallowing the query and the path that follow it.
+    // allow_extra_args(false) is required on top: CLI11 turns it on by default
+    // for vector options and it overrides the expected count, which is how
+    // "--ext log ." used to eat the positional too. TakeAll then keeps every
+    // occurrence instead of rejecting the second one.
     app.add_option("--exclude", exclude,
-                   "Glob pattern to exclude (matched against entry name); repeatable");
+                   "Glob pattern to exclude (matched against entry name); repeatable")
+        ->expected(1)
+        ->allow_extra_args(false)
+        ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
 
     app.add_option("--ext", extensions,
-                   "File extension to keep (with or without dot); repeatable; empty = any");
+                   "File extension to keep (with or without dot); repeatable; empty = any")
+        ->expected(1)
+        ->allow_extra_args(false)
+        ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
 
     app.add_flag("--hidden", include_hidden,
                  "Descend into hidden directories and report hidden files");

@@ -220,6 +220,38 @@ TEST_CASE("an empty --ext is dropped rather than matching nothing") {
     CHECK(result.options.extensions.empty());
 }
 
+// Regression: a vector option is greedy by default in CLI11 and used to eat the
+// optional path positional, so "--ext log . dir" searched the current directory
+// for the literal path. The optional positional is what makes this visible; the
+// required query alone was enough to stop the greedy consumption.
+TEST_CASE("--ext does not swallow the positional arguments") {
+    const auto result = parse({"--ext", "cpp", ".", "C:/data"});
+
+    REQUIRE(result.should_run);
+    REQUIRE(result.options.extensions.size() == 1);
+    CHECK(result.options.extensions[0] == ".cpp");
+    CHECK(result.options.query == ".");
+    CHECK(result.options.root == "C:/data");
+}
+
+TEST_CASE("repeated --ext still leaves the positionals alone") {
+    const auto result = parse({"--ext", "cpp", "--ext", "h", ".", "C:/data"});
+
+    REQUIRE(result.should_run);
+    REQUIRE(result.options.extensions.size() == 2);
+    CHECK(result.options.query == ".");
+    CHECK(result.options.root == "C:/data");
+}
+
+TEST_CASE("--exclude does not swallow the positional arguments") {
+    const auto result = parse({"--exclude", "*.tmp", "needle", "C:/data"});
+
+    REQUIRE(result.should_run);
+    REQUIRE(result.options.exclude.size() == 1);
+    CHECK(result.options.query == "needle");
+    CHECK(result.options.root == "C:/data");
+}
+
 TEST_CASE("--hidden enables hidden file traversal") {
     const auto result = parse({"--hidden", "needle"});
 
