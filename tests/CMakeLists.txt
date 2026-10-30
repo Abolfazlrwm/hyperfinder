@@ -58,7 +58,7 @@ endif()
 # used as the separator when they are handed to the script.
 function(hyperfinder_cli_test name)
     cmake_parse_arguments(CASE ""
-        "CODE;STDOUT;STDOUT_EXACT;EMPTY_STDOUT;UNEXPECT_STDOUT;STDERR;EMPTY_STDERR"
+        "CODE;STDOUT;STDOUT_EXACT;EMPTY_STDOUT;UNEXPECT_STDOUT;STDERR;EMPTY_STDERR;ENV"
         "ARGS"
         ${ARGN})
 
@@ -86,6 +86,9 @@ function(hyperfinder_cli_test name)
     endif()
     if(CASE_EMPTY_STDERR)
         list(APPEND definitions "-DEXPECT_EMPTY_STDERR=1")
+    endif()
+    if(CASE_ENV)
+        list(APPEND definitions "-DENV_SPEC=${CASE_ENV}")
     endif()
 
     add_test(NAME ${name}
@@ -179,6 +182,29 @@ string(ASCII 27 hyperfinder_escape)
 hyperfinder_cli_test(cli_color_never
     CODE 0 ARGS --color=never|a.txt|${HYPERFINDER_CLI_FIXTURE}
     STDOUT "a\\.txt" UNEXPECT_STDOUT "${hyperfinder_escape}")
+
+# --color=always forces the escape sequences even though CTest pipes stdout.
+hyperfinder_cli_test(cli_color_always
+    CODE 0 ARGS --color=always|a.txt|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT "${hyperfinder_escape}")
+
+# NO_COLOR disables colour regardless of the requested mode.
+hyperfinder_cli_test(cli_color_no_color_env
+    CODE 0 ARGS a.txt|${HYPERFINDER_CLI_FIXTURE}
+    ENV "NO_COLOR=1" UNEXPECT_STDOUT "${hyperfinder_escape}")
+
+# --color=auto stays plain when stdout is not a terminal (i.e. piped).
+hyperfinder_cli_test(cli_color_auto_piped
+    CODE 0 ARGS --color=auto|a.txt|${HYPERFINDER_CLI_FIXTURE}
+    UNEXPECT_STDOUT "${hyperfinder_escape}")
+
+# Removing every escape from the --color=always output yields the --color=never
+# output byte for byte.
+add_test(NAME cli_color_strip
+    COMMAND ${CMAKE_COMMAND}
+            -DEXE=$<TARGET_FILE:hyperfinder>
+            -DFIXTURE=${HYPERFINDER_CLI_FIXTURE}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_color_strip.cmake)
 
 # ---------------------------------------------------------------------------
 # Step -1: a MinGW build must not need MinGW DLLs on PATH.

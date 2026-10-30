@@ -100,8 +100,15 @@ void prepareConsole() {
 
 bool resolveColor(ColorMode mode) {
     if (mode == ColorMode::Never) return false;
-    if (mode == ColorMode::Always) return enableVirtualTerminal();
     if (noColorRequested()) return false;
+    if (mode == ColorMode::Always) {
+        // --color=always forces colour onto a pipe as well; enabling virtual
+        // terminal processing is best effort here, because on a real console it
+        // lets the escapes render, but a pipe has no console to enable it on.
+        enableVirtualTerminal();
+        return true;
+    }
+    // Auto: only when stdout is a terminal.
     if (!stdoutIsTerminal()) return false;
     return enableVirtualTerminal();
 }

@@ -18,8 +18,15 @@ if(DEFINED ARGS AND NOT "${ARGS}" STREQUAL "")
     string(REPLACE "|" ";" arguments "${ARGS}")
 endif()
 
+# An optional NAME=VALUE environment override for the child, used to simulate
+# NO_COLOR without changing the test runner's own environment.
+set(command "${EXE}" ${arguments})
+if(DEFINED ENV_SPEC AND NOT "${ENV_SPEC}" STREQUAL "")
+    set(command ${CMAKE_COMMAND} -E env "${ENV_SPEC}" ${command})
+endif()
+
 execute_process(
-    COMMAND "${EXE}" ${arguments}
+    COMMAND ${command}
     OUTPUT_VARIABLE stdout_text
     ERROR_VARIABLE stderr_text
     RESULT_VARIABLE exit_code
