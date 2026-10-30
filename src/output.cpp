@@ -10,6 +10,7 @@
 #include <string_view>
 
 #if defined(_WIN32)
+#include <fcntl.h>
 #include <io.h>
 #include <windows.h>
 #else
@@ -87,6 +88,12 @@ void prepareConsole() {
         // Windows Terminal and recent consoles render UTF-8 correctly once the
         // output code page says so. Without it, Persian names become mojibake.
         ::SetConsoleOutputCP(CP_UTF8);
+    } else {
+        // Redirected or piped: write the bytes exactly as built. The CRT's text
+        // mode would turn every '\n' into "\r\n", which is wrong for a tool
+        // whose output is meant to be parsed. The console keeps text mode
+        // because a bare '\n' there moves down without returning to column 0.
+        ::_setmode(::_fileno(stdout), _O_BINARY);
     }
 #endif
 }
