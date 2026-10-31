@@ -202,7 +202,9 @@ $ hyperfinder --min-size 10k --max-size 2M --newer-than 7d . .
   arguments, unreadable root). A path that cannot be read is a warning, not an
   error, so the scan still succeeds.
 
-Colour is applied only to the matched part of a file name. `--color=auto`
+Colour is applied only to the matched part of a file name: the literal query in
+substring mode, the whole name in `--glob` mode (the pattern describes the entire
+name), and the span the pattern found in `--regex` mode. `--color=auto`
 enables it only when stdout is a terminal and `NO_COLOR` is unset; a pipe never
 gets escape sequences. On Windows the console's virtual terminal processing is
 enabled first, and a console that refuses it gets plain text instead.
@@ -328,7 +330,7 @@ CMake 4.4.4, Ninja**.
 
 - `cmake --preset dev`, `cmake --build --preset dev` and `ctest --preset dev`
   build with zero warnings and pass: **142 doctest cases / 383 assertions**, plus
-  **45 end-to-end cases** that run the built executable. The `release` preset
+  **48 end-to-end cases** that run the built executable. The `release` preset
   passes the same suite.
 - The install rules were checked earlier by installing into a temporary prefix
   and building a separate consumer project against it with `find_package`.

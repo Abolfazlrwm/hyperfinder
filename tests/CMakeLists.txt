@@ -204,6 +204,23 @@ hyperfinder_cli_test(cli_color_auto_piped
     CODE 0 ARGS --color=auto|a.txt|${HYPERFINDER_CLI_FIXTURE}
     UNEXPECT_STDOUT "${hyperfinder_escape}")
 
+# Colour must work in every match mode. In glob and regex mode the query is a
+# pattern, so highlighting it as a literal substring would paint nothing at all;
+# these two cases pin the highlighted span to the whole file name.
+hyperfinder_cli_test(cli_color_glob
+    CODE 0 ARGS --color=always|--glob|*.txt|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT "${hyperfinder_escape}\\[1;32ma\\.txt${hyperfinder_escape}\\[0m")
+
+hyperfinder_cli_test(cli_color_regex
+    CODE 0 ARGS --color=always|--regex|^a.txt$|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT "${hyperfinder_escape}\\[1;32ma\\.txt${hyperfinder_escape}\\[0m")
+
+# A pattern that matches the empty string has no span to paint, and must not
+# emit a stray escape pair (highlight immediately followed by reset).
+hyperfinder_cli_test(cli_color_regex_empty_match
+    CODE 0 ARGS --color=always|--regex|a*|${HYPERFINDER_CLI_FIXTURE}
+    UNEXPECT_STDOUT "\\[1;32m${hyperfinder_escape}\\[0m")
+
 # ---------------------------------------------------------------------------
 # Step 1: matching modes
 # ---------------------------------------------------------------------------
