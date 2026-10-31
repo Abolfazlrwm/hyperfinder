@@ -6,6 +6,7 @@
 #include <exception>
 #include <filesystem>
 #include <mutex>
+#include <regex>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -27,6 +28,15 @@ struct SearchStats {
 
     // Wall-clock duration of the last search(), measured around the scan only.
     double elapsed_seconds = 0.0;
+};
+
+// One line of a file whose contents matched --content. `line` is 1-based and
+// `text` is the line with a trailing CR removed and, if it is very long,
+// truncated to a printable width (see the implementation).
+struct ContentMatch {
+    std::string path;
+    std::size_t line = 0;
+    std::string text;
 };
 
 // Scans a directory tree and collects the paths that match.
@@ -51,6 +61,10 @@ public:
     // returned; not safe to call while a search is running.
     const std::vector<std::string>& results() const noexcept;
 
+    // The matching lines from the last content search, sorted by path and then
+    // by line number. Empty unless options.content was set.
+    const std::vector<ContentMatch>& contentMatches() const noexcept;
+
     SearchStats stats() const;
     std::uint64_t getScannedCount() const;
     std::uint64_t getSkippedCount() const;
@@ -60,7 +74,19 @@ private:
     void scanDirectory(const fs::path& path, std::size_t depth);
     void submit(const fs::path& path, std::size_t depth);
     void recordError(std::exception_ptr error);
-    bool containsQuery(const std::string& filename) const;
+    bool nameMatches(const std::string& filename) const;
+
+    // Applies the --min-size/--max-size and --newer-than bounds to a regular
+    // file. Both stats are only taken when the corresponding filter is active,
+    // so an unfiltered search pays nothing for them.
+    bool passesSizeAndTime(const fs::path& path);
+
+    // Reads `path` in chunks and appends one ContentMatch per matching line.
+    // Runs on a pool thread; merges its results under results_mutex.
+    void scanContent(const fs::path& path);
+
+    // Enqueues scanContent(path) as its own pool task.
+    void submitContent(const fs::path& path);
 
     // Returns true when `directory` was already reached during this search, and
     // records it otherwise. Only used with follow_symlinks, where a link can
@@ -74,8 +100,24 @@ private:
     // options.query, lower-cased once when ignore_case is on, so the hot path
     // does not re-fold the needle for every file.
     std::string query;
+    MatchMode match_mode_;
+    // Compiled pattern, valid only when match_mode_ == MatchMode::Regex. Built in
+    // the constructor; an invalid pattern throws std::regex_error, which main()
+    // turns into exit code 2.
+    std::regex regex_;
+
+    // True when options.newer_than_enabled is set. The cutoff is stored as whole
+    // seconds on the file clock: a nanosecond file_time_type cannot represent
+    // dates past ~2262 (int64 nanoseconds overflow), and a year-2999 cutoff is a
+    // reasonable thing to ask for. Comparing in seconds sidesteps that.
+    bool has_cutoff_ = false;
+    std::int64_t cutoff_seconds_ = 0;
+
     fs::path rootPath;
     std::vector<std::string> matches;
+    std::vector<ContentMatch> content_matches_;
+    // options.content, lower-cased once when ignore_case is on.
+    std::string content_needle_;
     mutable std::mutex results_mutex;
 
     std::atomic<std::uint64_t> filesScanned{0};

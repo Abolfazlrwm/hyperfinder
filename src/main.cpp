@@ -41,11 +41,23 @@ int run(const std::vector<std::string>& args) {
         searcher.search();
 
         const hyperfinder::SearchStats stats = searcher.stats();
-        const std::size_t count = searcher.results().size();
+        // In content mode a "match" is a matching line; otherwise it is a file.
+        const bool content_mode = !parsed.options.content.empty();
+        const std::size_t count =
+            content_mode ? searcher.contentMatches().size() : searcher.results().size();
 
         if (parsed.options.count_only) {
             std::cout << count << '\n';
             std::cout.flush();
+        } else if (parsed.options.output_format == hyperfinder::OutputFormat::Json) {
+            hyperfinder::writeJsonMatches(searcher.results(), searcher.contentMatches(),
+                                          content_mode);
+        } else if (parsed.options.output_format == hyperfinder::OutputFormat::Print0) {
+            hyperfinder::writePrint0Matches(searcher.results(), searcher.contentMatches(),
+                                            content_mode);
+        } else if (content_mode) {
+            hyperfinder::writeContentMatches(searcher.contentMatches(), parsed.options,
+                                             hyperfinder::resolveColor(parsed.options.color));
         } else {
             hyperfinder::writeMatches(searcher.results(), parsed.options,
                                       hyperfinder::resolveColor(parsed.options.color));

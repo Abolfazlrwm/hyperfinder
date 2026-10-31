@@ -23,6 +23,21 @@ bool resolveColor(ColorMode mode);
 // colour is on, only the matched part of the file name is highlighted.
 void writeMatches(const std::vector<std::string>& matches, const Options& options, bool color);
 
+// Writes one "path:line:text" record per content match, in the order given.
+// When colour is on, the matched text inside the line is highlighted.
+void writeContentMatches(const std::vector<ContentMatch>& matches, const Options& options,
+                         bool color);
+
+// Writes one JSON object per line (NDJSON): {"path":...} for name matches, or
+// {"path":...,"line":N,"text":...} for content matches. Never coloured.
+void writeJsonMatches(const std::vector<std::string>& paths,
+                      const std::vector<ContentMatch>& content_matches, bool content_mode);
+
+// Writes records terminated by a NUL byte instead of a newline. The record is
+// the path for name matches, or "path:line:text" for content matches.
+void writePrint0Matches(const std::vector<std::string>& paths,
+                        const std::vector<ContentMatch>& content_matches, bool content_mode);
+
 // Writes the warning (if any) and the summary to stderr.
 void writeSummary(const SearchStats& stats, std::size_t match_count);
 

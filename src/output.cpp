@@ -1,5 +1,6 @@
 #include "output.h"
 
+#include <hyperfinder/json.h>
 #include <hyperfinder/match.h>
 
 #include <cstdint>
@@ -54,6 +55,19 @@ bool noColorRequested() {
     return value != nullptr && value[0] != '\0';
 }
 
+// Human-friendly elapsed time: "16.9 ms" below a second, "1.24 s" above. Two
+// significant decimals keep the number readable without pretending to a
+// precision the clock does not have.
+std::string formatDuration(double seconds) {
+    char buffer[32];
+    if (seconds < 1.0) {
+        std::snprintf(buffer, sizeof(buffer), "%.1f ms", seconds * 1000.0);
+    } else {
+        std::snprintf(buffer, sizeof(buffer), "%.2f s", seconds);
+    }
+    return buffer;
+}
+
 // Highlights the matched substring inside the file name, leaving the directory
 // part and the rest of the name untouched.
 std::string highlight(const std::string& path, const Options& options) {
@@ -80,6 +94,27 @@ std::string highlight(const std::string& path, const Options& options) {
     return out;
 }
 
+// Highlights the matched substring inside a content line. `text` is already
+// truncated to a printable width, so the match may fall outside it; in that
+// case the line is printed plain.
+std::string highlightContent(const std::string& text, const Options& options) {
+    const std::string haystack = options.ignore_case ? toLowerAscii(text) : text;
+    const std::string needle = options.ignore_case ? toLowerAscii(options.content) : options.content;
+    if (needle.empty()) return text;
+
+    const std::size_t position = haystack.find(needle);
+    if (position == std::string::npos) return text;
+
+    std::string out;
+    out.reserve(text.size() + 16);
+    out.append(text, 0, position);
+    out += kHighlight;
+    out.append(text, position, needle.size());
+    out += kReset;
+    out.append(text, position + needle.size(), std::string::npos);
+    return out;
+}
+
 }  // namespace
 
 void prepareConsole() {
@@ -100,8 +135,15 @@ void prepareConsole() {
 
 bool resolveColor(ColorMode mode) {
     if (mode == ColorMode::Never) return false;
-    if (mode == ColorMode::Always) return enableVirtualTerminal();
     if (noColorRequested()) return false;
+    if (mode == ColorMode::Always) {
+        // --color=always forces colour onto a pipe as well; enabling virtual
+        // terminal processing is best effort here, because on a real console it
+        // lets the escapes render, but a pipe has no console to enable it on.
+        enableVirtualTerminal();
+        return true;
+    }
+    // Auto: only when stdout is a terminal.
     if (!stdoutIsTerminal()) return false;
     return enableVirtualTerminal();
 }
@@ -116,6 +158,76 @@ void writeMatches(const std::vector<std::string>& matches, const Options& option
             buffer += path;
         }
         buffer += '\n';
+    }
+    std::cout.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    std::cout.flush();
+}
+
+void writeContentMatches(const std::vector<ContentMatch>& matches, const Options& options,
+                         bool color) {
+    std::string buffer;
+    buffer.reserve(matches.size() * 96);
+    for (const ContentMatch& match : matches) {
+        buffer += match.path;
+        buffer += ':';
+        buffer += std::to_string(match.line);
+        buffer += ':';
+        if (color) {
+            buffer += highlightContent(match.text, options);
+        } else {
+            buffer += match.text;
+        }
+        buffer += '\n';
+    }
+    std::cout.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    std::cout.flush();
+}
+
+void writeJsonMatches(const std::vector<std::string>& paths,
+                      const std::vector<ContentMatch>& content_matches, bool content_mode) {
+    std::string buffer;
+    if (content_mode) {
+        buffer.reserve(content_matches.size() * 96);
+        for (const ContentMatch& match : content_matches) {
+            buffer += "{\"path\":\"";
+            buffer += jsonEscape(match.path);
+            buffer += "\",\"line\":";
+            buffer += std::to_string(match.line);
+            buffer += ",\"text\":\"";
+            buffer += jsonEscape(match.text);
+            buffer += "\"}\n";
+        }
+    } else {
+        buffer.reserve(paths.size() * 48);
+        for (const std::string& path : paths) {
+            buffer += "{\"path\":\"";
+            buffer += jsonEscape(path);
+            buffer += "\"}\n";
+        }
+    }
+    std::cout.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    std::cout.flush();
+}
+
+void writePrint0Matches(const std::vector<std::string>& paths,
+                        const std::vector<ContentMatch>& content_matches, bool content_mode) {
+    std::string buffer;
+    if (content_mode) {
+        buffer.reserve(content_matches.size() * 64);
+        for (const ContentMatch& match : content_matches) {
+            buffer += match.path;
+            buffer += ':';
+            buffer += std::to_string(match.line);
+            buffer += ':';
+            buffer += match.text;
+            buffer += '\0';
+        }
+    } else {
+        buffer.reserve(paths.size() * 48);
+        for (const std::string& path : paths) {
+            buffer += path;
+            buffer += '\0';
+        }
     }
     std::cout.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
     std::cout.flush();
@@ -137,7 +249,7 @@ void writeSummary(const SearchStats& stats, std::size_t match_count) {
     std::cerr << plural(static_cast<std::uint64_t>(match_count), "match", "matches") << ", "
               << plural(stats.files_scanned, "file", "files") << ", "
               << plural(stats.directories_scanned, "directory", "directories")
-              << " scanned in " << stats.elapsed_seconds << " s\n";
+              << " scanned in " << formatDuration(stats.elapsed_seconds) << "\n";
 }
 
 }  // namespace hyperfinder

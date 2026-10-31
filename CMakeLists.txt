@@ -60,6 +60,18 @@ FetchContent_MakeAvailable(cli11)
 # ---------------------------------------------------------------------------
 option(HYPERFINDER_BUILD_TESTS "Build the test suite" ON)
 option(HYPERFINDER_ENABLE_SANITIZERS "Build with the sanitizers below" OFF)
+
+# Link the C++ runtime statically on MinGW. The default MinGW build depends on
+# libstdc++-6.dll, libgcc_s_seh-1.dll and libwinpthread-1.dll, and if an older
+# 32-bit MinGW sits earlier on PATH than the 64-bit toolchain, the 64-bit exe
+# loads the wrong DLL and exits with 0xC000007B before printing anything. Static
+# linking removes that whole class of failure; other toolchains don't ship those
+# DLLs, so the option is off there (and MSVC uses /MT only when asked).
+set(HYPERFINDER_STATIC_RUNTIME_DEFAULT OFF)
+if(MINGW)
+    set(HYPERFINDER_STATIC_RUNTIME_DEFAULT ON)
+endif()
+option(HYPERFINDER_STATIC_RUNTIME "Statically link the MinGW C++ runtime (no MinGW DLLs needed)" ${HYPERFINDER_STATIC_RUNTIME_DEFAULT})
 set(HYPERFINDER_SANITIZER "address,undefined" CACHE STRING
     "Which sanitizers to enable: address, thread, undefined, or address,undefined")
 
@@ -111,6 +123,7 @@ endfunction()
 add_library(hyperfinder_core STATIC
     src/cli.cpp
     src/file_searcher.cpp
+    src/json.cpp
     src/match.cpp
     src/thread_pool.cpp
 )
@@ -135,6 +148,16 @@ target_compile_features(hyperfinder_core PUBLIC cxx_std_17)
 target_link_libraries(hyperfinder_core PUBLIC Threads::Threads)
 hyperfinder_set_warnings(hyperfinder_core)
 
+# On MinGW, pull the C++ runtime into the binaries so they run on a machine that
+# has no MinGW on PATH. -static also drags in winpthread, which the threads
+# support needs on some MinGW builds. Both the executable and the test binary
+# link this: without it `ctest` fails with 0xC000007B when the shell it was
+# started from has no MinGW DLLs on PATH.
+add_library(hyperfinder_runtime INTERFACE)
+if(MINGW AND HYPERFINDER_STATIC_RUNTIME)
+    target_link_options(hyperfinder_runtime INTERFACE -static -static-libgcc -static-libstdc++)
+endif()
+
 # ---------------------------------------------------------------------------
 # Command-line front end
 # ---------------------------------------------------------------------------
@@ -142,7 +165,7 @@ add_executable(hyperfinder
     src/main.cpp
     src/output.cpp
 )
-target_link_libraries(hyperfinder PRIVATE hyperfinder::core)
+target_link_libraries(hyperfinder PRIVATE hyperfinder::core hyperfinder_runtime)
 # CommandLineToArgvW, used to read the UTF-16 command line on Windows.
 if(WIN32)
     target_link_libraries(hyperfinder PRIVATE shell32)

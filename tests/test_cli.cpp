@@ -341,4 +341,182 @@ TEST_CASE("--help lists the new options") {
     CHECK(result.stdout_text.find("--follow-symlinks") != std::string::npos);
     CHECK(result.stdout_text.find("--count") != std::string::npos);
     CHECK(result.stdout_text.find("--color") != std::string::npos);
+    CHECK(result.stdout_text.find("--min-size") != std::string::npos);
+    CHECK(result.stdout_text.find("--max-size") != std::string::npos);
+    CHECK(result.stdout_text.find("--newer-than") != std::string::npos);
+    CHECK(result.stdout_text.find("--glob") != std::string::npos);
+    CHECK(result.stdout_text.find("--regex") != std::string::npos);
+    CHECK(result.stdout_text.find("--content") != std::string::npos);
+    CHECK(result.stdout_text.find("--json") != std::string::npos);
+    CHECK(result.stdout_text.find("--print0") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: matching modes
+// ---------------------------------------------------------------------------
+
+TEST_CASE("the default match mode is substring") {
+    const auto result = parse({"needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.match_mode == hyperfinder::MatchMode::Substring);
+}
+
+TEST_CASE("--glob selects glob matching") {
+    const auto result = parse({"--glob", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.match_mode == hyperfinder::MatchMode::Glob);
+}
+
+TEST_CASE("--regex selects regex matching") {
+    const auto result = parse({"--regex", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.match_mode == hyperfinder::MatchMode::Regex);
+}
+
+TEST_CASE("--glob and --regex cannot be combined") {
+    const auto result = parse({"--glob", "--regex", "needle"});
+
+    CHECK_FALSE(result.should_run);
+    CHECK(result.exit_code == 2);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: size and modification-time filters
+// ---------------------------------------------------------------------------
+
+TEST_CASE("--min-size and --max-size parse decimal units") {
+    const auto result = parse({"--min-size", "10k", "--max-size", "5M", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.min_size == 10000);
+    CHECK(result.options.max_size == 5000000);
+}
+
+TEST_CASE("--min-size accepts a G suffix and a trailing b") {
+    const auto gigabytes = parse({"--min-size", "2G", "needle"});
+    REQUIRE(gigabytes.should_run);
+    CHECK(gigabytes.options.min_size == 2000000000);
+
+    const auto kilobytes = parse({"--max-size", "10kb", "needle"});
+    REQUIRE(kilobytes.should_run);
+    CHECK(kilobytes.options.max_size == 10000);
+}
+
+TEST_CASE("an invalid size is a usage error") {
+    const auto result = parse({"--min-size", "abc", "needle"});
+
+    CHECK_FALSE(result.should_run);
+    CHECK(result.exit_code == 2);
+}
+
+TEST_CASE("--min-size larger than --max-size is a usage error") {
+    const auto result = parse({"--min-size", "10M", "--max-size", "1k", "needle"});
+
+    CHECK_FALSE(result.should_run);
+    CHECK(result.exit_code == 2);
+}
+
+TEST_CASE("--newer-than parses a duration") {
+    const auto result = parse({"--newer-than", "7d", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.newer_than_enabled);
+    CHECK(result.options.newer_than.count() == 7 * 24 * 3600);
+    CHECK(result.options.newer_than_date.empty());
+}
+
+TEST_CASE("--newer-than parses an ISO date") {
+    const auto result = parse({"--newer-than", "2026-01-31", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.newer_than_enabled);
+    CHECK(result.options.newer_than_date == "2026-01-31");
+}
+
+TEST_CASE("an invalid --newer-than is a usage error") {
+    const auto bad_unit = parse({"--newer-than", "7x", "needle"});
+    CHECK(bad_unit.exit_code == 2);
+
+    const auto bad_date = parse({"--newer-than", "2026-13-01", "needle"});
+    CHECK(bad_date.exit_code == 2);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: content search
+// ---------------------------------------------------------------------------
+
+TEST_CASE("--content sets the needle and allows an empty query") {
+    const auto result = parse({"--content", "TODO", "dir"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.content == "TODO");
+    CHECK(result.options.query.empty());
+    CHECK(result.options.root == "dir");
+}
+
+TEST_CASE("--content accepts an optional name query before the path") {
+    const auto result = parse({"--content", "TODO", "*.cpp", "src"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.content == "TODO");
+    CHECK(result.options.query == "*.cpp");
+    CHECK(result.options.root == "src");
+}
+
+TEST_CASE("--content-max-size is parsed with the same units") {
+    const auto result = parse({"--content", "x", "--content-max-size", "1M", "dir"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.content_max_size == 1000000);
+}
+
+TEST_CASE("without a query or --content the run is a usage error") {
+    const auto result = parse({});
+
+    CHECK_FALSE(result.should_run);
+    CHECK(result.exit_code == 2);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: output formats
+// ---------------------------------------------------------------------------
+
+TEST_CASE("--json selects the JSON output format") {
+    const auto result = parse({"--json", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.output_format == hyperfinder::OutputFormat::Json);
+}
+
+TEST_CASE("--print0 selects the NUL output format") {
+    const auto result = parse({"--print0", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.output_format == hyperfinder::OutputFormat::Print0);
+}
+
+TEST_CASE("--help has a Usage label and no double blank lines") {
+    const auto result = parse({"--help"});
+
+    CHECK(result.exit_code == 0);
+    CHECK(result.stdout_text.find("Usage: hyperfinder") != std::string::npos);
+    // No run of three newlines, i.e. no two consecutive blank lines.
+    CHECK(result.stdout_text.find("\n\n\n") == std::string::npos);
+}
+
+TEST_CASE("--json and --print0 cannot be combined") {
+    const auto result = parse({"--json", "--print0", "needle"});
+
+    CHECK_FALSE(result.should_run);
+    CHECK(result.exit_code == 2);
+}
+
+TEST_CASE("--count cannot be combined with --json") {
+    const auto result = parse({"--count", "--json", "needle"});
+
+    CHECK_FALSE(result.should_run);
+    CHECK(result.exit_code == 2);
 }

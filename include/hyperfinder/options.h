@@ -1,7 +1,10 @@
 #ifndef HYPERFINDER_OPTIONS_H
 #define HYPERFINDER_OPTIONS_H
 
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -18,14 +21,32 @@ enum class ColorMode {
     Never,
 };
 
+// How the query is matched against a file name.
+enum class MatchMode {
+    Substring,  // default: the query is a literal substring
+    Glob,       // the query is a shell-style glob (* and ? wildcards)
+    Regex,      // the query is an ECMAScript regular expression, matched against
+                // the file name (not the full path)
+};
+
+// How matches are written to stdout.
+enum class OutputFormat {
+    Lines,   // one path (or "path:line:text") per line, the default
+    Json,    // one JSON object per line (NDJSON)
+    Print0,  // NUL-terminated records, for xargs -0 and friends
+};
+
 // Everything the command line can change, in the form the core library needs.
 //
 // Deliberately a plain aggregate with no parsing, no I/O and no OS calls: the
 // command-line layer fills it in, tests can build one by hand, and the search
 // code never has to know that a command line exists.
 struct Options {
-    // Substring to look for in file names.
+    // Substring / glob / regex to look for in file names, depending on match_mode.
     std::string query;
+
+    // How `query` is interpreted.
+    MatchMode match_mode = MatchMode::Substring;
 
     // Directory to search, as UTF-8.
     std::string root = ".";
@@ -53,12 +74,38 @@ struct Options {
     // Hidden entries are skipped unless this is set.
     bool include_hidden = false;
 
+    // File size bounds in bytes, inclusive. The defaults are unbounded: 0 and
+    // the largest representable size.
+    std::uintmax_t min_size = 0;
+    std::uintmax_t max_size = std::numeric_limits<std::uintmax_t>::max();
+
+    // Only report files whose modification time is at or after the cutoff.
+    // When newer_than_date is a non-empty ISO "YYYY-MM-DD", the cutoff is local
+    // midnight of that day; otherwise it is `newer_than` seconds before the
+    // search starts.
+    bool newer_than_enabled = false;
+    std::chrono::seconds newer_than{0};
+    std::string newer_than_date;
+
     // Follow directory links. Off by default, because a cycle would otherwise
     // make the scan run forever.
     bool follow_symlinks = false;
 
+    // When non-empty, a file is only reported if its contents contain this
+    // literal text. Name filters still apply first. The search is byte-wise and
+    // ASCII-case-insensitive when ignore_case is set; UTF-8 sequences are never
+    // split. Empty disables the content search.
+    std::string content;
+
+    // Files larger than this are not content-searched, in bytes. Keeps a stray
+    // multi-gigabyte log from stalling the scan. Default 16 MiB.
+    std::uintmax_t content_max_size = 16ull * 1024ull * 1024ull;
+
     // Print only the number of matches.
     bool count_only = false;
+
+    // How matches are written to stdout.
+    OutputFormat output_format = OutputFormat::Lines;
 
     ColorMode color = ColorMode::Auto;
 };

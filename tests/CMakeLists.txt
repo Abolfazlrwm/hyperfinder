@@ -26,9 +26,10 @@ add_executable(hyperfinder_tests
     test_file_searcher.cpp
     test_filters.cpp
     test_cli.cpp
+    test_json.cpp
     test_stress.cpp
 )
-target_link_libraries(hyperfinder_tests PRIVATE hyperfinder::core doctest::doctest)
+target_link_libraries(hyperfinder_tests PRIVATE hyperfinder::core hyperfinder_runtime doctest::doctest)
 hyperfinder_set_warnings(hyperfinder_tests)
 
 add_test(NAME hyperfinder_tests COMMAND hyperfinder_tests)
@@ -57,8 +58,13 @@ endif()
 # Every case is a call to this function. ARGS is a list of arguments; a '|' is
 # used as the separator when they are handed to the script.
 function(hyperfinder_cli_test name)
-    cmake_parse_arguments(CASE ""
-        "CODE;STDOUT;STDOUT_EXACT;EMPTY_STDOUT;UNEXPECT_STDOUT;STDERR;EMPTY_STDERR"
+    # EMPTY_STDOUT / EMPTY_STDERR are boolean flags, not values: a bare keyword
+    # marks the assertion. Treating them as one-value keywords made them swallow
+    # the next token, so "EMPTY_STDOUT STDERR <text>" silently dropped the
+    # stderr check.
+    cmake_parse_arguments(CASE
+        "EMPTY_STDOUT;EMPTY_STDERR"
+        "CODE;STDOUT;STDOUT_EXACT;UNEXPECT_STDOUT;STDERR;ENV"
         "ARGS"
         ${ARGN})
 
@@ -86,6 +92,9 @@ function(hyperfinder_cli_test name)
     endif()
     if(CASE_EMPTY_STDERR)
         list(APPEND definitions "-DEXPECT_EMPTY_STDERR=1")
+    endif()
+    if(CASE_ENV)
+        list(APPEND definitions "-DENV_SPEC=${CASE_ENV}")
     endif()
 
     add_test(NAME ${name}
@@ -179,4 +188,161 @@ string(ASCII 27 hyperfinder_escape)
 hyperfinder_cli_test(cli_color_never
     CODE 0 ARGS --color=never|a.txt|${HYPERFINDER_CLI_FIXTURE}
     STDOUT "a\\.txt" UNEXPECT_STDOUT "${hyperfinder_escape}")
+
+# --color=always forces the escape sequences even though CTest pipes stdout.
+hyperfinder_cli_test(cli_color_always
+    CODE 0 ARGS --color=always|a.txt|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT "${hyperfinder_escape}")
+
+# NO_COLOR disables colour regardless of the requested mode.
+hyperfinder_cli_test(cli_color_no_color_env
+    CODE 0 ARGS a.txt|${HYPERFINDER_CLI_FIXTURE}
+    ENV "NO_COLOR=1" UNEXPECT_STDOUT "${hyperfinder_escape}")
+
+# --color=auto stays plain when stdout is not a terminal (i.e. piped).
+hyperfinder_cli_test(cli_color_auto_piped
+    CODE 0 ARGS --color=auto|a.txt|${HYPERFINDER_CLI_FIXTURE}
+    UNEXPECT_STDOUT "${hyperfinder_escape}")
+
+# ---------------------------------------------------------------------------
+# Step 1: matching modes
+# ---------------------------------------------------------------------------
+hyperfinder_cli_test(cli_glob
+    CODE 0 ARGS --count|--glob|*.txt|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 7)
+
+hyperfinder_cli_test(cli_regex
+    CODE 0 ARGS --count|--regex|^a.*|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 1)
+
+hyperfinder_cli_test(cli_invalid_regex
+    CODE 2 ARGS --regex|*abc|${HYPERFINDER_CLI_FIXTURE}
+    EMPTY_STDOUT STDERR "error:")
+
+# ---------------------------------------------------------------------------
+# Step 2: size and modification-time filters
+#
+# Every fixture file is tiny (25-26 bytes, depending on whether CMake writes LF
+# or CRLF) and was written at configure time. The sizes below are deliberately
+# far from that boundary so the counts are identical on every platform; the
+# exact inclusive boundary is covered by the C++ unit tests instead.
+# ---------------------------------------------------------------------------
+hyperfinder_cli_test(cli_min_size_excludes_small
+    CODE 1 ARGS --count|--min-size|1k|.|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 0)
+
+hyperfinder_cli_test(cli_max_size_keeps_all
+    CODE 0 ARGS --count|--max-size|1k|.|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 10)
+
+hyperfinder_cli_test(cli_min_size_keeps_all
+    CODE 0 ARGS --count|--min-size|1|.|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 10)
+
+hyperfinder_cli_test(cli_max_size_excludes_all
+    CODE 1 ARGS --count|--max-size|1|.|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 0)
+
+hyperfinder_cli_test(cli_newer_than_past_date
+    CODE 0 ARGS --count|--newer-than|2000-01-01|.|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 10)
+
+hyperfinder_cli_test(cli_newer_than_future_date
+    CODE 1 ARGS --count|--newer-than|2999-01-01|.|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 0)
+
+hyperfinder_cli_test(cli_invalid_size
+    CODE 2 ARGS --min-size|abc|needle|${HYPERFINDER_CLI_FIXTURE}
+    EMPTY_STDOUT STDERR "size")
+
+hyperfinder_cli_test(cli_invalid_newer_than
+    CODE 2 ARGS --newer-than|7x|needle|${HYPERFINDER_CLI_FIXTURE}
+    EMPTY_STDOUT STDERR "unit")
+
+# ---------------------------------------------------------------------------
+# Step 3: content search
+#
+# Every fixture file contains "hyperfinder test fixture".
+# ---------------------------------------------------------------------------
+hyperfinder_cli_test(cli_content_finds_all
+    CODE 0 ARGS --count|--content|hyperfinder|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 10)
+
+hyperfinder_cli_test(cli_content_reports_line_and_text
+    CODE 0 ARGS --content|hyperfinder|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT "a\\.txt:1:hyperfinder test fixture")
+
+hyperfinder_cli_test(cli_content_no_match
+    CODE 1 ARGS --count|--content|zzzabsent|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 0)
+
+hyperfinder_cli_test(cli_content_is_case_insensitive
+    CODE 0 ARGS --count|--content|HYPERFINDER|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 10)
+
+hyperfinder_cli_test(cli_content_case_sensitive
+    CODE 1 ARGS --count|--case-sensitive|--content|HYPERFINDER|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 0)
+
+# ---------------------------------------------------------------------------
+# Step 4: output formats
+# ---------------------------------------------------------------------------
+hyperfinder_cli_test(cli_json_name
+    CODE 0 ARGS --json|a.txt|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT "\"path\":\".*a\\.txt\"")
+
+hyperfinder_cli_test(cli_json_content
+    CODE 0 ARGS --json|--content|hyperfinder|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT "\"line\":1,\"text\":\"hyperfinder")
+
+hyperfinder_cli_test(cli_count_json_rejected
+    CODE 2 ARGS --count|--json|.|${HYPERFINDER_CLI_FIXTURE}
+    EMPTY_STDOUT STDERR "cannot be combined")
+
+# --print0 writes NUL-terminated records; the harness works on text, so a small
+# script checks the raw bytes instead.
+add_test(NAME cli_print0
+    COMMAND ${CMAKE_COMMAND}
+            -DEXE=$<TARGET_FILE:hyperfinder>
+            -DFIXTURE=${HYPERFINDER_CLI_FIXTURE}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_print0_case.cmake)
+
+# ---------------------------------------------------------------------------
+# Step 6: CLI polish. The summary uses singular/plural correctly and a
+# human-readable duration, and it stays on stderr.
+# ---------------------------------------------------------------------------
+add_test(NAME cli_summary_singular
+    COMMAND ${CMAKE_COMMAND}
+            -DEXE=$<TARGET_FILE:hyperfinder>
+            -DTREE=${CMAKE_CURRENT_BINARY_DIR}/summary_tree
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_summary_case.cmake)
+
+# Removing every escape from the --color=always output yields the --color=never
+# output byte for byte.
+add_test(NAME cli_color_strip
+    COMMAND ${CMAKE_COMMAND}
+            -DEXE=$<TARGET_FILE:hyperfinder>
+            -DFIXTURE=${HYPERFINDER_CLI_FIXTURE}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_color_strip.cmake)
+
+# ---------------------------------------------------------------------------
+# Step -1: a MinGW build must not need MinGW DLLs on PATH.
+# Only meaningful where we actually use the MinGW toolchain (CI uses MSVC, so
+# this guards the local builds and any MinGW CI run).
+# ---------------------------------------------------------------------------
+if(MINGW AND HYPERFINDER_STATIC_RUNTIME)
+    add_test(NAME cli_static_runtime
+        COMMAND ${CMAKE_COMMAND}
+                -DEXE=$<TARGET_FILE:hyperfinder>
+                -DSTATIC_RUNTIME=${HYPERFINDER_STATIC_RUNTIME}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/check_mingw_runtime.cmake)
+    # The test binary links the same runtime, so `ctest` works from a shell with
+    # no MinGW on PATH. --count makes doctest list the case count and exit.
+    add_test(NAME cli_static_runtime_tests
+        COMMAND ${CMAKE_COMMAND}
+                -DEXE=$<TARGET_FILE:hyperfinder_tests>
+                -DARGS=--count
+                -DSTATIC_RUNTIME=${HYPERFINDER_STATIC_RUNTIME}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/check_mingw_runtime.cmake)
+endif()
 
