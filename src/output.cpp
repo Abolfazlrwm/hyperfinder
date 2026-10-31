@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <regex>
 #include <string>
 #include <string_view>
 
@@ -68,29 +69,60 @@ std::string formatDuration(double seconds) {
     return buffer;
 }
 
-// Highlights the matched substring inside the file name, leaving the directory
-// part and the rest of the name untouched.
-std::string highlight(const std::string& path, const Options& options) {
+// Highlights the part of the file name that the query matched, leaving the
+// directory part and the rest of the name untouched. What "matched" means
+// depends on the match mode: a literal substring, the whole name for a glob
+// (the pattern describes the entire name), or the span a regex search found.
+// `pattern` is the compiled regex in regex mode and null otherwise.
+std::string highlight(const std::string& path, const Options& options,
+                      const std::regex* pattern) {
     const std::size_t separator = path.find_last_of("/\\");
     const std::size_t name_start = separator == std::string::npos ? 0 : separator + 1;
-    const std::string_view name(path.data() + name_start, path.size() - name_start);
+    const std::string name = path.substr(name_start);
 
-    // Folding is ASCII-only, so it preserves byte length and the offsets found
-    // in the folded copy are valid in the original.
-    const std::string haystack = options.ignore_case ? toLowerAscii(name) : std::string(name);
-    const std::string needle = options.ignore_case ? toLowerAscii(options.query) : options.query;
-    if (needle.empty()) return path;
+    std::size_t offset = 0;
+    std::size_t length = 0;
+    switch (options.match_mode) {
+        case MatchMode::Glob:
+            length = name.size();
+            break;
 
-    const std::size_t position = haystack.find(needle);
-    if (position == std::string::npos) return path;
+        case MatchMode::Regex: {
+            if (pattern == nullptr) return path;
+            std::smatch found;
+            if (!std::regex_search(name, found, *pattern)) return path;
+            offset = static_cast<std::size_t>(found.position());
+            length = static_cast<std::size_t>(found.length());
+            break;
+        }
+
+        case MatchMode::Substring:
+        default: {
+            // Folding is ASCII-only, so it preserves byte length and the offsets
+            // found in the folded copy are valid in the original.
+            const std::string haystack =
+                options.ignore_case ? toLowerAscii(name) : name;
+            const std::string needle =
+                options.ignore_case ? toLowerAscii(options.query) : options.query;
+            if (needle.empty()) return path;
+            const std::size_t position = haystack.find(needle);
+            if (position == std::string::npos) return path;
+            offset = position;
+            length = needle.size();
+            break;
+        }
+    }
+    // A pattern such as "a*" can match the empty string; there is nothing to
+    // paint in that case, and an empty span would emit a stray escape pair.
+    if (length == 0) return path;
 
     std::string out;
     out.reserve(path.size() + 16);
-    out.append(path, 0, name_start + position);
+    out.append(path, 0, name_start + offset);
     out += kHighlight;
-    out.append(path, name_start + position, needle.size());
+    out.append(path, name_start + offset, length);
     out += kReset;
-    out.append(path, name_start + position + needle.size(), std::string::npos);
+    out.append(path, name_start + offset + length, std::string::npos);
     return out;
 }
 
@@ -149,11 +181,28 @@ bool resolveColor(ColorMode mode) {
 }
 
 void writeMatches(const std::vector<std::string>& matches, const Options& options, bool color) {
+    // Compile the pattern once per run rather than once per match. The command
+    // line layer has already rejected an invalid pattern, but this file is also
+    // reachable from the library, so a failure here degrades to no colour
+    // instead of throwing out of the writer.
+    std::regex pattern;
+    const std::regex* compiled = nullptr;
+    if (color && options.match_mode == MatchMode::Regex) {
+        try {
+            pattern = std::regex(options.query, options.ignore_case
+                                                   ? std::regex::ECMAScript | std::regex::icase
+                                                   : std::regex::ECMAScript);
+            compiled = &pattern;
+        } catch (const std::regex_error&) {
+            compiled = nullptr;
+        }
+    }
+
     std::string buffer;
     buffer.reserve(matches.size() * 48);
     for (const std::string& path : matches) {
         if (color) {
-            buffer += highlight(path, options);
+            buffer += highlight(path, options, compiled);
         } else {
             buffer += path;
         }
