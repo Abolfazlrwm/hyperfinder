@@ -55,6 +55,19 @@ bool noColorRequested() {
     return value != nullptr && value[0] != '\0';
 }
 
+// Human-friendly elapsed time: "16.9 ms" below a second, "1.24 s" above. Two
+// significant decimals keep the number readable without pretending to a
+// precision the clock does not have.
+std::string formatDuration(double seconds) {
+    char buffer[32];
+    if (seconds < 1.0) {
+        std::snprintf(buffer, sizeof(buffer), "%.1f ms", seconds * 1000.0);
+    } else {
+        std::snprintf(buffer, sizeof(buffer), "%.2f s", seconds);
+    }
+    return buffer;
+}
+
 // Highlights the matched substring inside the file name, leaving the directory
 // part and the rest of the name untouched.
 std::string highlight(const std::string& path, const Options& options) {
@@ -236,7 +249,7 @@ void writeSummary(const SearchStats& stats, std::size_t match_count) {
     std::cerr << plural(static_cast<std::uint64_t>(match_count), "match", "matches") << ", "
               << plural(stats.files_scanned, "file", "files") << ", "
               << plural(stats.directories_scanned, "directory", "directories")
-              << " scanned in " << stats.elapsed_seconds << " s\n";
+              << " scanned in " << formatDuration(stats.elapsed_seconds) << "\n";
 }
 
 }  // namespace hyperfinder

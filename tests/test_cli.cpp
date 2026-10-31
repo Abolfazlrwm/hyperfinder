@@ -498,6 +498,15 @@ TEST_CASE("--print0 selects the NUL output format") {
     CHECK(result.options.output_format == hyperfinder::OutputFormat::Print0);
 }
 
+TEST_CASE("--help has a Usage label and no double blank lines") {
+    const auto result = parse({"--help"});
+
+    CHECK(result.exit_code == 0);
+    CHECK(result.stdout_text.find("Usage: hyperfinder") != std::string::npos);
+    // No run of three newlines, i.e. no two consecutive blank lines.
+    CHECK(result.stdout_text.find("\n\n\n") == std::string::npos);
+}
+
 TEST_CASE("--json and --print0 cannot be combined") {
     const auto result = parse({"--json", "--print0", "needle"});
 

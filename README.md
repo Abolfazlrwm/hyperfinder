@@ -112,7 +112,7 @@ so the paths can be piped:
 $ hyperfinder main .
 .\src\main.cpp
 .\src\main.hpp
-2 matches, 3 files, 2 directories scanned in 0.0009832 s
+2 matches, 3 files, 2 directories scanned in 0.5 ms
 ```
 
 `--max-depth 0` looks at the entries directly inside the root and descends no
@@ -121,7 +121,7 @@ further. `.cache` is hidden, so it is skipped without `--hidden`:
 ```console
 $ hyperfinder --max-depth 0 . .
 .\README.md
-1 match, 1 file, 1 directory scanned in 0.0004609 s
+1 match, 1 file, 1 directory scanned in 0.3 ms
 ```
 
 `--count` prints only the number:
@@ -129,7 +129,7 @@ $ hyperfinder --max-depth 0 . .
 ```console
 $ hyperfinder --count --ext hpp . .
 1
-1 match, 3 files, 2 directories scanned in 0.0006955 s
+1 match, 3 files, 2 directories scanned in 0.6 ms
 ```
 
 `--glob` and `--regex` change how the query is interpreted; they reject each
@@ -145,8 +145,8 @@ search, and each matching line is printed as `path:line:text`:
 
 ```console
 $ hyperfinder --content TODO --ext cpp src
-.\src\main.cpp:42:    // TODO: replace the stub
-1 match, 2 files, 2 directories scanned in 0.0011023 s
+src\main.cpp:2:    // TODO: replace the stub
+1 match, 2 files, 1 directory scanned in 7.2 ms
 ```
 
 Size and age narrow the candidate set before a file is even opened:

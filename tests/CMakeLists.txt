@@ -307,6 +307,16 @@ add_test(NAME cli_print0
             -DFIXTURE=${HYPERFINDER_CLI_FIXTURE}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_print0_case.cmake)
 
+# ---------------------------------------------------------------------------
+# Step 6: CLI polish. The summary uses singular/plural correctly and a
+# human-readable duration, and it stays on stderr.
+# ---------------------------------------------------------------------------
+add_test(NAME cli_summary_singular
+    COMMAND ${CMAKE_COMMAND}
+            -DEXE=$<TARGET_FILE:hyperfinder>
+            -DTREE=${CMAKE_CURRENT_BINARY_DIR}/summary_tree
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_summary_case.cmake)
+
 # Removing every escape from the --color=always output yields the --color=never
 # output byte for byte.
 add_test(NAME cli_color_strip

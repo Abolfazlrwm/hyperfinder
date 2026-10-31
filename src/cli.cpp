@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -44,6 +45,38 @@ ParseResult usageError(std::string message) {
     result.stderr_text = std::move(message);
     result.stderr_text += "\nTry 'hyperfinder --help' for more information.\n";
     return result;
+}
+
+// CLI11's help emits a bare usage line and can leave two blank lines around it.
+// Add the "Usage:" label and collapse any run of blank lines to a single one, so
+// the output has the shape people expect from a command-line tool.
+std::string tidyHelp(std::string help) {
+    // Collapse a run of three or more newlines (two or more blank lines) into
+    // exactly two, which is one blank line.
+    std::string collapsed;
+    collapsed.reserve(help.size());
+    int newlines = 0;
+    for (const char c : help) {
+        if (c == '\n') {
+            ++newlines;
+            if (newlines <= 2) collapsed += c;
+        } else {
+            newlines = 0;
+            collapsed += c;
+        }
+    }
+
+    // Prefix the usage line with "Usage: " unless it already carries a label.
+    const std::size_t options_position = collapsed.find("[OPTIONS]");
+    if (options_position != std::string::npos) {
+        const std::size_t previous = collapsed.rfind('\n', options_position);
+        const std::size_t line_start = previous == std::string::npos ? 0 : previous + 1;
+        const std::string_view line(collapsed.data() + line_start, options_position - line_start);
+        if (line.find("Usage:") == std::string_view::npos) {
+            collapsed.insert(line_start, "Usage: ");
+        }
+    }
+    return collapsed;
 }
 
 // Parses --color=auto|always|never into a ColorMode. Returns an empty string
@@ -314,11 +347,11 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
         app.parse(static_cast<int>(argv.size()), argv.data());
     } catch (const CLI::CallForAllHelp&) {
         ParseResult result;
-        result.stdout_text = app.help();
+        result.stdout_text = tidyHelp(app.help());
         return result;
     } catch (const CLI::CallForHelp&) {
         ParseResult result;
-        result.stdout_text = app.help();
+        result.stdout_text = tidyHelp(app.help());
         return result;
     } catch (const CLI::CallForVersion& version) {
         ParseResult result;
