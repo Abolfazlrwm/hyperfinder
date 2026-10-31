@@ -29,7 +29,7 @@ add_executable(hyperfinder_tests
     test_json.cpp
     test_stress.cpp
 )
-target_link_libraries(hyperfinder_tests PRIVATE hyperfinder::core doctest::doctest)
+target_link_libraries(hyperfinder_tests PRIVATE hyperfinder::core hyperfinder_runtime doctest::doctest)
 hyperfinder_set_warnings(hyperfinder_tests)
 
 add_test(NAME hyperfinder_tests COMMAND hyperfinder_tests)
@@ -334,6 +334,14 @@ if(MINGW AND HYPERFINDER_STATIC_RUNTIME)
     add_test(NAME cli_static_runtime
         COMMAND ${CMAKE_COMMAND}
                 -DEXE=$<TARGET_FILE:hyperfinder>
+                -DSTATIC_RUNTIME=${HYPERFINDER_STATIC_RUNTIME}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/check_mingw_runtime.cmake)
+    # The test binary links the same runtime, so `ctest` works from a shell with
+    # no MinGW on PATH. --count makes doctest list the case count and exit.
+    add_test(NAME cli_static_runtime_tests
+        COMMAND ${CMAKE_COMMAND}
+                -DEXE=$<TARGET_FILE:hyperfinder_tests>
+                -DARGS=--count
                 -DSTATIC_RUNTIME=${HYPERFINDER_STATIC_RUNTIME}
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/check_mingw_runtime.cmake)
 endif()

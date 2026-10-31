@@ -148,6 +148,16 @@ target_compile_features(hyperfinder_core PUBLIC cxx_std_17)
 target_link_libraries(hyperfinder_core PUBLIC Threads::Threads)
 hyperfinder_set_warnings(hyperfinder_core)
 
+# On MinGW, pull the C++ runtime into the binaries so they run on a machine that
+# has no MinGW on PATH. -static also drags in winpthread, which the threads
+# support needs on some MinGW builds. Both the executable and the test binary
+# link this: without it `ctest` fails with 0xC000007B when the shell it was
+# started from has no MinGW DLLs on PATH.
+add_library(hyperfinder_runtime INTERFACE)
+if(MINGW AND HYPERFINDER_STATIC_RUNTIME)
+    target_link_options(hyperfinder_runtime INTERFACE -static -static-libgcc -static-libstdc++)
+endif()
+
 # ---------------------------------------------------------------------------
 # Command-line front end
 # ---------------------------------------------------------------------------
@@ -155,16 +165,10 @@ add_executable(hyperfinder
     src/main.cpp
     src/output.cpp
 )
-target_link_libraries(hyperfinder PRIVATE hyperfinder::core)
+target_link_libraries(hyperfinder PRIVATE hyperfinder::core hyperfinder_runtime)
 # CommandLineToArgvW, used to read the UTF-16 command line on Windows.
 if(WIN32)
     target_link_libraries(hyperfinder PRIVATE shell32)
-endif()
-# On MinGW, pull the C++ runtime into the binary so it runs on a machine that
-# has no MinGW on PATH. -static also drags in winpthread, which the threads
-# support needs on some MinGW builds.
-if(MINGW AND HYPERFINDER_STATIC_RUNTIME)
-    target_link_options(hyperfinder PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
 hyperfinder_set_warnings(hyperfinder)
 

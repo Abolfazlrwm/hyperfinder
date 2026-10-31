@@ -299,6 +299,7 @@ CMake scripts for the executable, all registered with CTest.
 | Thread pool | `waitIdle`, nested enqueue, single-worker nesting, future values, exception propagation, destruction while idle and with pending work |
 | Command line | every option, usage errors, `--help`, `--version` |
 | Executable | exit codes, stream separation, `--count` and the filters against a fixed tree |
+| Packaging | both MinGW binaries are checked for MinGW DLL imports and launched with MinGW removed from `PATH` |
 
 Fixtures are created under the system temp directory and removed when the test
 ends.
@@ -327,7 +328,7 @@ CMake 4.4.4, Ninja**.
 
 - `cmake --preset dev`, `cmake --build --preset dev` and `ctest --preset dev`
   build with zero warnings and pass: **142 doctest cases / 383 assertions**, plus
-  **44 end-to-end cases** that run the built executable. The `release` preset
+  **45 end-to-end cases** that run the built executable. The `release` preset
   passes the same suite.
 - The install rules were checked earlier by installing into a temporary prefix
   and building a separate consumer project against it with `find_package`.
