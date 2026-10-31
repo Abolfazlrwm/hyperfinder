@@ -187,6 +187,9 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
 
     std::string query;
     std::string root = ".";
+    // Positionals are resolved after parsing: a single value is the name query
+    // normally, but the directory to search when --content is used.
+    std::vector<std::string> positional;
     std::size_t threads = 0;
     bool ignore_case_flag = false;
     bool case_sensitive_flag = false;
@@ -203,9 +206,12 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
     std::string min_size_str;
     std::string max_size_str;
     std::string newer_than_str;
+    std::string content;
+    std::string content_max_size_str;
 
-    app.add_option("query", query, "Substring to look for in file names")->required();
-    app.add_option("path", root, "Directory to search")->capture_default_str();
+    // Positionals: [NAME-QUERY] [PATH]. With --content a single positional is
+    // the PATH to search, because the name query is usually omitted then.
+    app.add_option("args", positional, "NAME-QUERY [PATH], or just [PATH] with --content");
 
     auto* threads_option = app.add_option(
         "-j,--threads", threads, "Worker threads; 0 means one per hardware thread");
@@ -265,6 +271,11 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
                    "Only files modified within a window (7d, 12h, 30m) or on/after a date "
                    "(YYYY-MM-DD)");
 
+    app.add_option("--content", content,
+                   "Only report files whose contents contain this literal text");
+    app.add_option("--content-max-size", content_max_size_str,
+                   "Skip content search in files larger than this (default 16M)");
+
     app.add_flag("--follow-symlinks", follow_symlinks,
                  "Follow directory symlinks (cycles are detected and skipped)");
 
@@ -305,9 +316,32 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
         return usageError(error.what());
     }
 
+    // Resolve positionals: at most two, [NAME-QUERY] [PATH].
+    if (positional.size() > 2) {
+        return usageError("too many arguments");
+    }
+    if (!content.empty()) {
+        // Content mode: one positional is the directory to search; two are an
+        // optional name query followed by the path.
+        if (positional.size() == 1) {
+            root = positional[0];
+        } else if (positional.size() == 2) {
+            query = positional[0];
+            root = positional[1];
+        }
+    } else {
+        if (positional.size() >= 1) query = positional[0];
+        if (positional.size() == 2) root = positional[1];
+    }
+
     if (threads > kMaxThreads) {
         return usageError("-j/--threads must be between 0 and " + std::to_string(kMaxThreads) +
                           " (got " + std::to_string(threads) + ")");
+    }
+
+    // Either a name query or --content must be present.
+    if (query.empty() && content.empty()) {
+        return usageError("a name query or --content is required");
     }
 
     // Resolve the colour mode. --no-color wins over --color because it is the
@@ -346,6 +380,13 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
         if (!error.empty()) return usageError(error);
     }
 
+    // Content-search size cap. 16 MiB unless overridden.
+    std::uintmax_t content_max_size = 16ull * 1024ull * 1024ull;
+    if (!content_max_size_str.empty()) {
+        const std::string error = parseSize(content_max_size_str, content_max_size);
+        if (!error.empty()) return usageError(error);
+    }
+
     ParseResult result;
     result.should_run = true;
     result.options.query = std::move(query);
@@ -375,6 +416,8 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
     result.options.newer_than_enabled = newer_than_enabled;
     result.options.newer_than = newer_than;
     result.options.newer_than_date = std::move(newer_than_date);
+    result.options.content = std::move(content);
+    result.options.content_max_size = content_max_size;
     result.options.color = color_mode;
     return result;
 }

@@ -4,9 +4,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <ctime>
+#include <fstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -161,6 +164,47 @@ bool parseIsoDate(std::string_view text, fs::file_time_type& out) {
     return true;
 }
 
+// --- Content search helpers -------------------------------------------------
+
+// Streaming read size. A match that straddles two chunks is still found because
+// the current line is accumulated across chunk boundaries before it is tested.
+constexpr std::size_t kContentChunk = 64 * 1024;
+// A file whose first bytes contain a NUL is treated as binary and skipped.
+constexpr std::size_t kBinaryProbe = 8 * 1024;
+// Long lines are cut to this many bytes before they are printed.
+constexpr std::size_t kMaxLineLength = 200;
+
+// ASCII-only case-insensitive find. `needle_lower` must already be lower-cased;
+// bytes >= 0x80 are compared unchanged, so UTF-8 sequences match exactly.
+std::size_t findAsciiCaseInsensitive(std::string_view haystack, std::string_view needle_lower) {
+    if (needle_lower.empty()) return 0;
+    if (needle_lower.size() > haystack.size()) return std::string_view::npos;
+    const std::size_t n = needle_lower.size();
+    for (std::size_t i = 0; i + n <= haystack.size(); ++i) {
+        std::size_t j = 0;
+        for (; j < n; ++j) {
+            char c = haystack[i + j];
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+            if (c != needle_lower[j]) break;
+        }
+        if (j == n) return i;
+    }
+    return std::string_view::npos;
+}
+
+// Truncates `line` to `max` bytes without splitting a UTF-8 code point, and
+// marks the cut with an ellipsis.
+std::string truncateLine(std::string_view line, std::size_t max) {
+    if (line.size() <= max) return std::string(line);
+    std::size_t cut = max;
+    // Back off while the byte at the cut is a continuation byte (10xxxxxx), so
+    // the ellipsis never lands inside a multi-byte sequence.
+    while (cut > 0 && (static_cast<unsigned char>(line[cut]) & 0xC0) == 0x80) --cut;
+    std::string out(line.substr(0, cut));
+    out += "...";
+    return out;
+}
+
 }  // namespace
 
 namespace hyperfinder {
@@ -179,6 +223,7 @@ FileSearcher::FileSearcher(Options opts)
                                                        : std::regex::ECMAScript)
                  : std::regex()),
       rootPath(fs::u8path(options.root)),
+      content_needle_(options.ignore_case ? toLowerAscii(options.content) : options.content),
       pool(options.threads == 0 ? ThreadPool::defaultThreadCount() : options.threads) {
     // Resolve the --newer-than cutoff once, before any worker starts. A relative
     // window is measured back from "now" on the file clock; an ISO date is local
@@ -262,6 +307,107 @@ bool FileSearcher::passesSizeAndTime(const fs::path& path) {
     return true;
 }
 
+void FileSearcher::submitContent(const fs::path& path) {
+    pool.enqueue([this, path] {
+        try {
+            scanContent(path);
+        } catch (...) {
+            recordError(std::current_exception());
+        }
+    });
+}
+
+void FileSearcher::scanContent(const fs::path& path) {
+    // Size guard: a file bigger than the limit is skipped rather than read.
+    std::error_code size_ec;
+    const std::uintmax_t size = fs::file_size(path, size_ec);
+    if (size_ec) {
+        skippedPaths.fetch_add(1);
+        return;
+    }
+    if (size > options.content_max_size) return;
+
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        skippedPaths.fetch_add(1);
+        return;
+    }
+
+    std::vector<ContentMatch> local;
+    std::string line;
+    line.reserve(256);
+    std::size_t line_number = 1;
+    bool binary = false;
+    bool first_chunk = true;
+
+    const auto process_line = [&]() {
+        std::string_view view(line);
+        // CRLF: the CR belongs to the line terminator, not the text.
+        if (!view.empty() && view.back() == '\r') view.remove_suffix(1);
+
+        const bool hit = options.ignore_case
+                             ? findAsciiCaseInsensitive(view, content_needle_) !=
+                                   std::string_view::npos
+                             : view.find(options.content) != std::string_view::npos;
+        if (hit) {
+            ContentMatch match;
+            match.path = path.u8string();
+            match.line = line_number;
+            match.text = truncateLine(view, kMaxLineLength);
+            local.push_back(std::move(match));
+        }
+        line.clear();
+    };
+
+    // Feeds a chunk into the current-line buffer. The line is only tested at a
+    // '\n', so a match split across two chunks is still found: both halves are
+    // appended to the same buffer before it is examined.
+    const auto consume = [&](const char* data, std::size_t count) {
+        if (first_chunk) {
+            first_chunk = false;
+            const std::size_t probe = count < kBinaryProbe ? count : kBinaryProbe;
+            if (std::memchr(data, '\0', probe) != nullptr) {
+                binary = true;
+                return;
+            }
+        }
+        const char* p = data;
+        const char* const end = data + count;
+        while (p < end) {
+            const auto* nl = static_cast<const char*>(
+                std::memchr(p, '\n', static_cast<std::size_t>(end - p)));
+            if (nl == nullptr) {
+                line.append(p, static_cast<std::size_t>(end - p));
+                break;
+            }
+            line.append(p, static_cast<std::size_t>(nl - p));
+            process_line();
+            ++line_number;
+            p = nl + 1;
+        }
+    };
+
+    std::vector<char> buffer(kContentChunk);
+    while (in) {
+        in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        const std::streamsize got = in.gcount();
+        if (got <= 0) break;
+        consume(buffer.data(), static_cast<std::size_t>(got));
+        if (binary) break;
+    }
+    if (binary) return;
+
+    // A file that does not end in a newline still has a final line.
+    if (!line.empty()) process_line();
+
+    if (!local.empty()) {
+        std::lock_guard<std::mutex> lock(results_mutex);
+        matches.push_back(path.u8string());
+        content_matches_.insert(content_matches_.end(), std::make_move_iterator(local.begin()),
+                                std::make_move_iterator(local.end()));
+    }
+}
+
 void FileSearcher::scanDirectory(const fs::path& path, std::size_t depth) {
     // skip_permission_denied asks the iterator to walk past entries it is not
     // allowed to read instead of throwing. All remaining filesystem calls use
@@ -331,9 +477,16 @@ void FileSearcher::scanDirectory(const fs::path& path, std::size_t depth) {
                     }
                 } else if (resolved && fs::is_regular_file(effective)) {
                     filesScanned.fetch_add(1);
-                    if (matchesExtension(name, options.extensions) && nameMatches(name) &&
+                    // An empty query means "any name": --content is usually run
+                    // without a name filter.
+                    const bool name_ok = options.query.empty() || nameMatches(name);
+                    if (matchesExtension(name, options.extensions) && name_ok &&
                         passesSizeAndTime(entry.path())) {
-                        found.push_back(entry.path().u8string());
+                        if (options.content.empty()) {
+                            found.push_back(entry.path().u8string());
+                        } else {
+                            submitContent(entry.path());
+                        }
                     }
                 }
             }
@@ -386,6 +539,7 @@ void FileSearcher::search() {
     {
         std::lock_guard<std::mutex> lock(results_mutex);
         matches.clear();
+        content_matches_.clear();
     }
     {
         std::lock_guard<std::mutex> lock(visited_mutex);
@@ -415,6 +569,11 @@ void FileSearcher::search() {
     // Worker threads finish in an unpredictable order, so the raw result order
     // changes from run to run. Sort once here; no task is running any more.
     std::sort(matches.begin(), matches.end());
+    std::sort(content_matches_.begin(), content_matches_.end(),
+              [](const ContentMatch& a, const ContentMatch& b) {
+                  if (a.path != b.path) return a.path < b.path;
+                  return a.line < b.line;
+              });
 
     elapsedSeconds.store(std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
                              .count());
@@ -422,6 +581,10 @@ void FileSearcher::search() {
 
 const std::vector<std::string>& FileSearcher::results() const noexcept {
     return matches;
+}
+
+const std::vector<ContentMatch>& FileSearcher::contentMatches() const noexcept {
+    return content_matches_;
 }
 
 SearchStats FileSearcher::stats() const {

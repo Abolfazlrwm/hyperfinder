@@ -258,6 +258,31 @@ hyperfinder_cli_test(cli_invalid_newer_than
     CODE 2 ARGS --newer-than|7x|needle|${HYPERFINDER_CLI_FIXTURE}
     EMPTY_STDOUT STDERR "unit")
 
+# ---------------------------------------------------------------------------
+# Step 3: content search
+#
+# Every fixture file contains "hyperfinder test fixture".
+# ---------------------------------------------------------------------------
+hyperfinder_cli_test(cli_content_finds_all
+    CODE 0 ARGS --count|--content|hyperfinder|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 10)
+
+hyperfinder_cli_test(cli_content_reports_line_and_text
+    CODE 0 ARGS --content|hyperfinder|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT "a\\.txt:1:hyperfinder test fixture")
+
+hyperfinder_cli_test(cli_content_no_match
+    CODE 1 ARGS --count|--content|zzzabsent|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 0)
+
+hyperfinder_cli_test(cli_content_is_case_insensitive
+    CODE 0 ARGS --count|--content|HYPERFINDER|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 10)
+
+hyperfinder_cli_test(cli_content_case_sensitive
+    CODE 1 ARGS --count|--case-sensitive|--content|HYPERFINDER|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 0)
+
 # Removing every escape from the --color=always output yields the --color=never
 # output byte for byte.
 add_test(NAME cli_color_strip

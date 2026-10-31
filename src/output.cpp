@@ -80,6 +80,27 @@ std::string highlight(const std::string& path, const Options& options) {
     return out;
 }
 
+// Highlights the matched substring inside a content line. `text` is already
+// truncated to a printable width, so the match may fall outside it; in that
+// case the line is printed plain.
+std::string highlightContent(const std::string& text, const Options& options) {
+    const std::string haystack = options.ignore_case ? toLowerAscii(text) : text;
+    const std::string needle = options.ignore_case ? toLowerAscii(options.content) : options.content;
+    if (needle.empty()) return text;
+
+    const std::size_t position = haystack.find(needle);
+    if (position == std::string::npos) return text;
+
+    std::string out;
+    out.reserve(text.size() + 16);
+    out.append(text, 0, position);
+    out += kHighlight;
+    out.append(text, position, needle.size());
+    out += kReset;
+    out.append(text, position + needle.size(), std::string::npos);
+    return out;
+}
+
 }  // namespace
 
 void prepareConsole() {
@@ -121,6 +142,26 @@ void writeMatches(const std::vector<std::string>& matches, const Options& option
             buffer += highlight(path, options);
         } else {
             buffer += path;
+        }
+        buffer += '\n';
+    }
+    std::cout.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    std::cout.flush();
+}
+
+void writeContentMatches(const std::vector<ContentMatch>& matches, const Options& options,
+                         bool color) {
+    std::string buffer;
+    buffer.reserve(matches.size() * 96);
+    for (const ContentMatch& match : matches) {
+        buffer += match.path;
+        buffer += ':';
+        buffer += std::to_string(match.line);
+        buffer += ':';
+        if (color) {
+            buffer += highlightContent(match.text, options);
+        } else {
+            buffer += match.text;
         }
         buffer += '\n';
     }

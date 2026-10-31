@@ -440,3 +440,39 @@ TEST_CASE("an invalid --newer-than is a usage error") {
     const auto bad_date = parse({"--newer-than", "2026-13-01", "needle"});
     CHECK(bad_date.exit_code == 2);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5: content search
+// ---------------------------------------------------------------------------
+
+TEST_CASE("--content sets the needle and allows an empty query") {
+    const auto result = parse({"--content", "TODO", "dir"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.content == "TODO");
+    CHECK(result.options.query.empty());
+    CHECK(result.options.root == "dir");
+}
+
+TEST_CASE("--content accepts an optional name query before the path") {
+    const auto result = parse({"--content", "TODO", "*.cpp", "src"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.content == "TODO");
+    CHECK(result.options.query == "*.cpp");
+    CHECK(result.options.root == "src");
+}
+
+TEST_CASE("--content-max-size is parsed with the same units") {
+    const auto result = parse({"--content", "x", "--content-max-size", "1M", "dir"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.content_max_size == 1000000);
+}
+
+TEST_CASE("without a query or --content the run is a usage error") {
+    const auto result = parse({});
+
+    CHECK_FALSE(result.should_run);
+    CHECK(result.exit_code == 2);
+}

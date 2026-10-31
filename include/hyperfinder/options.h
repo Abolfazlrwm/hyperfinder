@@ -84,6 +84,16 @@ struct Options {
     // make the scan run forever.
     bool follow_symlinks = false;
 
+    // When non-empty, a file is only reported if its contents contain this
+    // literal text. Name filters still apply first. The search is byte-wise and
+    // ASCII-case-insensitive when ignore_case is set; UTF-8 sequences are never
+    // split. Empty disables the content search.
+    std::string content;
+
+    // Files larger than this are not content-searched, in bytes. Keeps a stray
+    // multi-gigabyte log from stalling the scan. Default 16 MiB.
+    std::uintmax_t content_max_size = 16ull * 1024ull * 1024ull;
+
     // Print only the number of matches.
     bool count_only = false;
 

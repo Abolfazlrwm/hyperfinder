@@ -30,6 +30,15 @@ struct SearchStats {
     double elapsed_seconds = 0.0;
 };
 
+// One line of a file whose contents matched --content. `line` is 1-based and
+// `text` is the line with a trailing CR removed and, if it is very long,
+// truncated to a printable width (see the implementation).
+struct ContentMatch {
+    std::string path;
+    std::size_t line = 0;
+    std::string text;
+};
+
 // Scans a directory tree and collects the paths that match.
 //
 // The class never writes to a stream. Everything it produces is returned
@@ -52,6 +61,10 @@ public:
     // returned; not safe to call while a search is running.
     const std::vector<std::string>& results() const noexcept;
 
+    // The matching lines from the last content search, sorted by path and then
+    // by line number. Empty unless options.content was set.
+    const std::vector<ContentMatch>& contentMatches() const noexcept;
+
     SearchStats stats() const;
     std::uint64_t getScannedCount() const;
     std::uint64_t getSkippedCount() const;
@@ -67,6 +80,13 @@ private:
     // file. Both stats are only taken when the corresponding filter is active,
     // so an unfiltered search pays nothing for them.
     bool passesSizeAndTime(const fs::path& path);
+
+    // Reads `path` in chunks and appends one ContentMatch per matching line.
+    // Runs on a pool thread; merges its results under results_mutex.
+    void scanContent(const fs::path& path);
+
+    // Enqueues scanContent(path) as its own pool task.
+    void submitContent(const fs::path& path);
 
     // Returns true when `directory` was already reached during this search, and
     // records it otherwise. Only used with follow_symlinks, where a link can
@@ -94,6 +114,9 @@ private:
 
     fs::path rootPath;
     std::vector<std::string> matches;
+    std::vector<ContentMatch> content_matches_;
+    // options.content, lower-cased once when ignore_case is on.
+    std::string content_needle_;
     mutable std::mutex results_mutex;
 
     std::atomic<std::uint64_t> filesScanned{0};

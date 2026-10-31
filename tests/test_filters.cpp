@@ -24,6 +24,7 @@
 #endif
 
 using hf_test::TempTree;
+using hyperfinder::ContentMatch;
 using hyperfinder::FileSearcher;
 using hyperfinder::kUnlimitedDepth;
 using hyperfinder::MatchMode;
@@ -44,6 +45,12 @@ std::vector<std::string> search(const Options& options) {
     FileSearcher searcher(options);
     searcher.search();
     return searcher.results();
+}
+
+std::vector<ContentMatch> contentSearch(const Options& options) {
+    FileSearcher searcher(options);
+    searcher.search();
+    return searcher.contentMatches();
 }
 
 // Names, not full paths: the temp root differs on every run.
@@ -394,6 +401,153 @@ TEST_CASE("Filters: an invalid --newer-than date is rejected") {
     options.newer_than_date = "2026-02-31";  // February has no 31st
 
     CHECK_THROWS_AS(FileSearcher searcher(options), std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: content search
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Content: reports the matching line and its number") {
+    TempTree tree("contentlines");
+    tree.makeFile("a.txt", "first\nsecond needle\nthird\n");
+
+    Options options = optionsFor("", tree.root());
+    options.content = "needle";
+
+    const std::vector<ContentMatch> matches = contentSearch(options);
+    REQUIRE(matches.size() == 1);
+    CHECK(matches[0].line == 2);
+    CHECK(matches[0].text == "second needle");
+}
+
+TEST_CASE("Content: a match split across a chunk boundary is found") {
+    TempTree tree("contentboundary");
+    // kContentChunk is 64 KiB; place the needle so it straddles that offset.
+    tree.makeFile("boundary.txt", std::string(65530, 'x') + "NEEDLE\n");
+
+    Options options = optionsFor("", tree.root());
+    options.content = "NEEDLE";
+
+    const std::vector<ContentMatch> matches = contentSearch(options);
+    REQUIRE(matches.size() == 1);
+    CHECK(matches[0].line == 1);
+}
+
+TEST_CASE("Content: a CRLF line is reported without the CR") {
+    TempTree tree("contentcrlf");
+    tree.makeFile("crlf.txt", "line1\r\nline2\r\n");
+
+    Options options = optionsFor("", tree.root());
+    options.content = "line2";
+
+    const std::vector<ContentMatch> matches = contentSearch(options);
+    REQUIRE(matches.size() == 1);
+    CHECK(matches[0].line == 2);
+    CHECK(matches[0].text == "line2");
+}
+
+TEST_CASE("Content: an empty file has no matches") {
+    TempTree tree("contentempty");
+    tree.makeFile("empty.txt", "");
+
+    Options options = optionsFor("", tree.root());
+    options.content = "anything";
+
+    CHECK(contentSearch(options).empty());
+}
+
+TEST_CASE("Content: a binary file is skipped") {
+    TempTree tree("contentbinary");
+    tree.makeFile("data.bin", std::string("a\0b\n", 4));
+
+    Options options = optionsFor("", tree.root());
+    options.content = "a";
+
+    CHECK(contentSearch(options).empty());
+}
+
+TEST_CASE("Content: Persian text matches") {
+    TempTree tree("contentpersian");
+    tree.makeFile("fa.txt", "سلام دنیا\nخط دوم\n");
+
+    Options options = optionsFor("", tree.root());
+    options.content = "سلام";
+
+    const std::vector<ContentMatch> matches = contentSearch(options);
+    REQUIRE(matches.size() == 1);
+    CHECK(matches[0].line == 1);
+    CHECK(matches[0].text == "سلام دنیا");
+}
+
+TEST_CASE("Content: the last line without a trailing newline is searched") {
+    TempTree tree("contentnonl");
+    tree.makeFile("nonl.txt", "abc");
+
+    Options options = optionsFor("", tree.root());
+    options.content = "abc";
+
+    const std::vector<ContentMatch> matches = contentSearch(options);
+    REQUIRE(matches.size() == 1);
+    CHECK(matches[0].line == 1);
+    CHECK(matches[0].text == "abc");
+}
+
+TEST_CASE("Content: a long line is truncated") {
+    TempTree tree("contentlong");
+    tree.makeFile("long.txt", std::string(500, 'x') + "\n");
+
+    Options options = optionsFor("", tree.root());
+    options.content = "x";
+
+    const std::vector<ContentMatch> matches = contentSearch(options);
+    REQUIRE(matches.size() == 1);
+    CHECK(matches[0].text.size() == 203);  // 200 bytes + "..."
+    CHECK(matches[0].text.substr(200) == "...");
+}
+
+TEST_CASE("Content: case-insensitive by default, sensitive with --case-sensitive") {
+    TempTree tree("contentcase");
+    tree.makeFile("case.txt", "Hello World\n");
+
+    Options insensitive = optionsFor("", tree.root());
+    insensitive.content = "hello";
+    CHECK(contentSearch(insensitive).size() == 1);
+
+    Options sensitive = optionsFor("", tree.root());
+    sensitive.content = "hello";
+    sensitive.ignore_case = false;
+    CHECK(contentSearch(sensitive).empty());
+}
+
+TEST_CASE("Content: name filters still apply") {
+    TempTree tree("contentname");
+    tree.makeFile("a.txt", "needle\n");
+    tree.makeFile("b.log", "needle\n");
+
+    Options options = optionsFor("", tree.root());
+    options.content = "needle";
+    options.extensions = {".txt"};
+
+    const std::vector<ContentMatch> matches = contentSearch(options);
+    REQUIRE(matches.size() == 1);
+    CHECK(fs::u8path(matches[0].path).filename().u8string() == "a.txt");
+}
+
+TEST_CASE("Content: multiple matching lines are sorted by path then line") {
+    TempTree tree("contentmulti");
+    tree.makeFile("b.txt", "hit\nhit\n");
+    tree.makeFile("a.txt", "hit\n");
+
+    Options options = optionsFor("", tree.root());
+    options.content = "hit";
+
+    const std::vector<ContentMatch> matches = contentSearch(options);
+    REQUIRE(matches.size() == 3);
+    CHECK(fs::u8path(matches[0].path).filename().u8string() == "a.txt");
+    CHECK(matches[0].line == 1);
+    CHECK(fs::u8path(matches[1].path).filename().u8string() == "b.txt");
+    CHECK(matches[1].line == 1);
+    CHECK(matches[2].line == 2);
 }
 
 TEST_CASE("Filters: results are sorted") {
