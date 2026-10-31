@@ -29,6 +29,13 @@ enum class MatchMode {
                 // the file name (not the full path)
 };
 
+// How matches are written to stdout.
+enum class OutputFormat {
+    Lines,   // one path (or "path:line:text") per line, the default
+    Json,    // one JSON object per line (NDJSON)
+    Print0,  // NUL-terminated records, for xargs -0 and friends
+};
+
 // Everything the command line can change, in the form the core library needs.
 //
 // Deliberately a plain aggregate with no parsing, no I/O and no OS calls: the
@@ -96,6 +103,9 @@ struct Options {
 
     // Print only the number of matches.
     bool count_only = false;
+
+    // How matches are written to stdout.
+    OutputFormat output_format = OutputFormat::Lines;
 
     ColorMode color = ColorMode::Auto;
 };

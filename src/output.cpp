@@ -1,5 +1,6 @@
 #include "output.h"
 
+#include <hyperfinder/json.h>
 #include <hyperfinder/match.h>
 
 #include <cstdint>
@@ -164,6 +165,56 @@ void writeContentMatches(const std::vector<ContentMatch>& matches, const Options
             buffer += match.text;
         }
         buffer += '\n';
+    }
+    std::cout.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    std::cout.flush();
+}
+
+void writeJsonMatches(const std::vector<std::string>& paths,
+                      const std::vector<ContentMatch>& content_matches, bool content_mode) {
+    std::string buffer;
+    if (content_mode) {
+        buffer.reserve(content_matches.size() * 96);
+        for (const ContentMatch& match : content_matches) {
+            buffer += "{\"path\":\"";
+            buffer += jsonEscape(match.path);
+            buffer += "\",\"line\":";
+            buffer += std::to_string(match.line);
+            buffer += ",\"text\":\"";
+            buffer += jsonEscape(match.text);
+            buffer += "\"}\n";
+        }
+    } else {
+        buffer.reserve(paths.size() * 48);
+        for (const std::string& path : paths) {
+            buffer += "{\"path\":\"";
+            buffer += jsonEscape(path);
+            buffer += "\"}\n";
+        }
+    }
+    std::cout.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    std::cout.flush();
+}
+
+void writePrint0Matches(const std::vector<std::string>& paths,
+                        const std::vector<ContentMatch>& content_matches, bool content_mode) {
+    std::string buffer;
+    if (content_mode) {
+        buffer.reserve(content_matches.size() * 64);
+        for (const ContentMatch& match : content_matches) {
+            buffer += match.path;
+            buffer += ':';
+            buffer += std::to_string(match.line);
+            buffer += ':';
+            buffer += match.text;
+            buffer += '\0';
+        }
+    } else {
+        buffer.reserve(paths.size() * 48);
+        for (const std::string& path : paths) {
+            buffer += path;
+            buffer += '\0';
+        }
     }
     std::cout.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
     std::cout.flush();

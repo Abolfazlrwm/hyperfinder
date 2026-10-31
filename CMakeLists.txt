@@ -123,6 +123,7 @@ endfunction()
 add_library(hyperfinder_core STATIC
     src/cli.cpp
     src/file_searcher.cpp
+    src/json.cpp
     src/match.cpp
     src/thread_pool.cpp
 )

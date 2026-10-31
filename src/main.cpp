@@ -49,6 +49,12 @@ int run(const std::vector<std::string>& args) {
         if (parsed.options.count_only) {
             std::cout << count << '\n';
             std::cout.flush();
+        } else if (parsed.options.output_format == hyperfinder::OutputFormat::Json) {
+            hyperfinder::writeJsonMatches(searcher.results(), searcher.contentMatches(),
+                                          content_mode);
+        } else if (parsed.options.output_format == hyperfinder::OutputFormat::Print0) {
+            hyperfinder::writePrint0Matches(searcher.results(), searcher.contentMatches(),
+                                            content_mode);
         } else if (content_mode) {
             hyperfinder::writeContentMatches(searcher.contentMatches(), parsed.options,
                                              hyperfinder::resolveColor(parsed.options.color));

@@ -202,6 +202,8 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
     bool follow_symlinks = false;
     bool count_only = false;
     bool no_color = false;
+    bool json_flag = false;
+    bool print0_flag = false;
     std::string color_str = "auto";
     std::string min_size_str;
     std::string max_size_str;
@@ -282,6 +284,16 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
     app.add_flag("--count", count_only,
                  "Print only the number of matches to stdout");
 
+    // Machine-readable output. The two formats are mutually exclusive: NDJSON is
+    // newline-delimited and --print0 is NUL-delimited.
+    auto* json_option =
+        app.add_flag("--json", json_flag, "Write one JSON object per line (NDJSON)");
+    auto* print0_option =
+        app.add_flag("--print0", print0_flag,
+                     "Terminate records with NUL instead of a newline (for xargs -0)");
+    json_option->excludes(print0_option);
+    print0_option->excludes(json_option);
+
     auto* no_color_option = app.add_flag("--no-color", no_color,
                                          "Disable colour output (same as --color=never)");
     auto* color_option =
@@ -342,6 +354,11 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
     // Either a name query or --content must be present.
     if (query.empty() && content.empty()) {
         return usageError("a name query or --content is required");
+    }
+
+    // --count prints a bare number, so it contradicts both record formats.
+    if (count_only && (json_flag || print0_flag)) {
+        return usageError("--count cannot be combined with --json or --print0");
     }
 
     // Resolve the colour mode. --no-color wins over --color because it is the
@@ -411,6 +428,11 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
     result.options.include_hidden = include_hidden;
     result.options.follow_symlinks = follow_symlinks;
     result.options.count_only = count_only;
+    if (json_flag) {
+        result.options.output_format = hyperfinder::OutputFormat::Json;
+    } else if (print0_flag) {
+        result.options.output_format = hyperfinder::OutputFormat::Print0;
+    }
     result.options.min_size = min_size;
     result.options.max_size = max_size;
     result.options.newer_than_enabled = newer_than_enabled;

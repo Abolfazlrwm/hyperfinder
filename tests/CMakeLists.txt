@@ -26,6 +26,7 @@ add_executable(hyperfinder_tests
     test_file_searcher.cpp
     test_filters.cpp
     test_cli.cpp
+    test_json.cpp
     test_stress.cpp
 )
 target_link_libraries(hyperfinder_tests PRIVATE hyperfinder::core doctest::doctest)
@@ -282,6 +283,29 @@ hyperfinder_cli_test(cli_content_is_case_insensitive
 hyperfinder_cli_test(cli_content_case_sensitive
     CODE 1 ARGS --count|--case-sensitive|--content|HYPERFINDER|${HYPERFINDER_CLI_FIXTURE}
     STDOUT_EXACT 0)
+
+# ---------------------------------------------------------------------------
+# Step 4: output formats
+# ---------------------------------------------------------------------------
+hyperfinder_cli_test(cli_json_name
+    CODE 0 ARGS --json|a.txt|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT "\"path\":\".*a\\.txt\"")
+
+hyperfinder_cli_test(cli_json_content
+    CODE 0 ARGS --json|--content|hyperfinder|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT "\"line\":1,\"text\":\"hyperfinder")
+
+hyperfinder_cli_test(cli_count_json_rejected
+    CODE 2 ARGS --count|--json|.|${HYPERFINDER_CLI_FIXTURE}
+    EMPTY_STDOUT STDERR "cannot be combined")
+
+# --print0 writes NUL-terminated records; the harness works on text, so a small
+# script checks the raw bytes instead.
+add_test(NAME cli_print0
+    COMMAND ${CMAKE_COMMAND}
+            -DEXE=$<TARGET_FILE:hyperfinder>
+            -DFIXTURE=${HYPERFINDER_CLI_FIXTURE}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_print0_case.cmake)
 
 # Removing every escape from the --color=always output yields the --color=never
 # output byte for byte.

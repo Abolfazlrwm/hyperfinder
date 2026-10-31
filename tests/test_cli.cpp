@@ -346,6 +346,9 @@ TEST_CASE("--help lists the new options") {
     CHECK(result.stdout_text.find("--newer-than") != std::string::npos);
     CHECK(result.stdout_text.find("--glob") != std::string::npos);
     CHECK(result.stdout_text.find("--regex") != std::string::npos);
+    CHECK(result.stdout_text.find("--content") != std::string::npos);
+    CHECK(result.stdout_text.find("--json") != std::string::npos);
+    CHECK(result.stdout_text.find("--print0") != std::string::npos);
 }
 
 // ---------------------------------------------------------------------------
@@ -472,6 +475,38 @@ TEST_CASE("--content-max-size is parsed with the same units") {
 
 TEST_CASE("without a query or --content the run is a usage error") {
     const auto result = parse({});
+
+    CHECK_FALSE(result.should_run);
+    CHECK(result.exit_code == 2);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: output formats
+// ---------------------------------------------------------------------------
+
+TEST_CASE("--json selects the JSON output format") {
+    const auto result = parse({"--json", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.output_format == hyperfinder::OutputFormat::Json);
+}
+
+TEST_CASE("--print0 selects the NUL output format") {
+    const auto result = parse({"--print0", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.output_format == hyperfinder::OutputFormat::Print0);
+}
+
+TEST_CASE("--json and --print0 cannot be combined") {
+    const auto result = parse({"--json", "--print0", "needle"});
+
+    CHECK_FALSE(result.should_run);
+    CHECK(result.exit_code == 2);
+}
+
+TEST_CASE("--count cannot be combined with --json") {
+    const auto result = parse({"--count", "--json", "needle"});
 
     CHECK_FALSE(result.should_run);
     CHECK(result.exit_code == 2);
