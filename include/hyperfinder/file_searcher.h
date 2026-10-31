@@ -63,6 +63,11 @@ private:
     void recordError(std::exception_ptr error);
     bool nameMatches(const std::string& filename) const;
 
+    // Applies the --min-size/--max-size and --newer-than bounds to a regular
+    // file. Both stats are only taken when the corresponding filter is active,
+    // so an unfiltered search pays nothing for them.
+    bool passesSizeAndTime(const fs::path& path);
+
     // Returns true when `directory` was already reached during this search, and
     // records it otherwise. Only used with follow_symlinks, where a link can
     // point back at an ancestor.
@@ -80,6 +85,13 @@ private:
     // the constructor; an invalid pattern throws std::regex_error, which main()
     // turns into exit code 2.
     std::regex regex_;
+
+    // True when options.newer_than_enabled is set. The cutoff is an absolute
+    // file-clock instant: relative windows are measured back from "now", while
+    // an ISO date is converted through the system clock (see file_searcher.cpp).
+    bool has_cutoff_ = false;
+    fs::file_time_type cutoff_{};
+
     fs::path rootPath;
     std::vector<std::string> matches;
     mutable std::mutex results_mutex;

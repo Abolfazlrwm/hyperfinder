@@ -4,8 +4,12 @@
 
 #include <CLI/CLI.hpp>
 
+#include <cctype>
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -57,6 +61,123 @@ std::string parseColorMode(const std::string& value, ColorMode& out) {
     return {};
 }
 
+// Parses a byte size such as "0", "512", "10k", "5M" or "2G". Units are
+// decimal (1k = 1000), matching how disk sizes are usually quoted. An optional
+// trailing "b" is accepted ("10kb"). Returns an empty string on success, an
+// error message otherwise.
+std::string parseSize(const std::string& text, std::uintmax_t& out) {
+    if (text.empty()) return "--min-size/--max-size must not be empty";
+
+    std::uintmax_t value = 0;
+    std::size_t i = 0;
+    bool any_digit = false;
+    for (; i < text.size() && text[i] >= '0' && text[i] <= '9'; ++i) {
+        any_digit = true;
+        const std::uintmax_t digit = static_cast<std::uintmax_t>(text[i] - '0');
+        if (value > (std::numeric_limits<std::uintmax_t>::max() - digit) / 10) {
+            return "size '" + text + "' is too large";
+        }
+        value = value * 10 + digit;
+    }
+    if (!any_digit) return "size '" + text + "' must start with a number";
+
+    std::uintmax_t multiplier = 1;
+    if (i < text.size()) {
+        const char suffix = static_cast<char>(std::tolower(static_cast<unsigned char>(text[i])));
+        if (suffix == 'k') {
+            multiplier = 1000ull;
+        } else if (suffix == 'm') {
+            multiplier = 1000ull * 1000ull;
+        } else if (suffix == 'g') {
+            multiplier = 1000ull * 1000ull * 1000ull;
+        } else {
+            return "size '" + text + "' has an unknown suffix (use k, M or G)";
+        }
+        ++i;
+        if (i < text.size() && (text[i] == 'b' || text[i] == 'B')) ++i;
+    }
+    if (i != text.size()) return "size '" + text + "' has trailing characters";
+
+    if (value != 0 && value > std::numeric_limits<std::uintmax_t>::max() / multiplier) {
+        return "size '" + text + "' is too large";
+    }
+    out = value * multiplier;
+    return {};
+}
+
+// Parses --newer-than. Accepts a duration (digits plus one of s, m, h, d, w) or
+// an ISO date (YYYY-MM-DD). The date is only range-checked here; the searcher
+// does the exact calendar validation when it resolves the cutoff.
+std::string parseNewerThan(const std::string& text, bool& enabled, std::chrono::seconds& window,
+                           std::string& date) {
+    if (text.size() == 10 && text[4] == '-' && text[7] == '-') {
+        int year = 0;
+        int month = 0;
+        int day = 0;
+        const auto digits = [](const std::string& s, std::size_t offset, std::size_t count,
+                               int& value) {
+            value = 0;
+            for (std::size_t i = 0; i < count; ++i) {
+                const char c = s[offset + i];
+                if (c < '0' || c > '9') return false;
+                value = value * 10 + (c - '0');
+            }
+            return true;
+        };
+        if (digits(text, 0, 4, year) && digits(text, 5, 2, month) && digits(text, 8, 2, day) &&
+            month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            enabled = true;
+            date = text;
+            return {};
+        }
+        return "--newer-than '" + text + "' is not a valid date (expected YYYY-MM-DD)";
+    }
+
+    std::uintmax_t value = 0;
+    std::size_t i = 0;
+    bool any_digit = false;
+    for (; i < text.size() && text[i] >= '0' && text[i] <= '9'; ++i) {
+        any_digit = true;
+        const std::uintmax_t digit = static_cast<std::uintmax_t>(text[i] - '0');
+        if (value > (std::numeric_limits<std::uintmax_t>::max() - digit) / 10) {
+            return "--newer-than '" + text + "' is too large";
+        }
+        value = value * 10 + digit;
+    }
+    if (!any_digit || i + 1 != text.size()) {
+        return "--newer-than must be a duration (7d, 12h, 30m) or a date (YYYY-MM-DD)";
+    }
+
+    std::uintmax_t seconds_per_unit = 0;
+    switch (text[i]) {
+        case 's':
+            seconds_per_unit = 1;
+            break;
+        case 'm':
+            seconds_per_unit = 60;
+            break;
+        case 'h':
+            seconds_per_unit = 60 * 60;
+            break;
+        case 'd':
+            seconds_per_unit = 24 * 60 * 60;
+            break;
+        case 'w':
+            seconds_per_unit = 7 * 24 * 60 * 60;
+            break;
+        default:
+            return "--newer-than unit must be one of s, m, h, d, w (got '" +
+                   std::string(1, text[i]) + "')";
+    }
+    if (value > static_cast<std::uintmax_t>(std::numeric_limits<std::int64_t>::max()) /
+                    seconds_per_unit) {
+        return "--newer-than '" + text + "' is too large";
+    }
+    enabled = true;
+    window = std::chrono::seconds(static_cast<std::int64_t>(value * seconds_per_unit));
+    return {};
+}
+
 }  // namespace
 
 ParseResult parseArguments(const std::vector<std::string>& args) {
@@ -79,6 +200,9 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
     bool count_only = false;
     bool no_color = false;
     std::string color_str = "auto";
+    std::string min_size_str;
+    std::string max_size_str;
+    std::string newer_than_str;
 
     app.add_option("query", query, "Substring to look for in file names")->required();
     app.add_option("path", root, "Directory to search")->capture_default_str();
@@ -132,6 +256,14 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
 
     app.add_flag("--hidden", include_hidden,
                  "Descend into hidden directories and report hidden files");
+
+    app.add_option("--min-size", min_size_str,
+                   "Minimum file size in bytes; accepts a k, M or G suffix (e.g. 10k, 5M)");
+    app.add_option("--max-size", max_size_str,
+                   "Maximum file size in bytes; accepts a k, M or G suffix (e.g. 10k, 5M)");
+    app.add_option("--newer-than", newer_than_str,
+                   "Only files modified within a window (7d, 12h, 30m) or on/after a date "
+                   "(YYYY-MM-DD)");
 
     app.add_flag("--follow-symlinks", follow_symlinks,
                  "Follow directory symlinks (cycles are detected and skipped)");
@@ -188,6 +320,32 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
         if (!error.empty()) return usageError(error);
     }
 
+    // Size bounds. The defaults are unbounded; --min-size/--max-size narrow them.
+    std::uintmax_t min_size = 0;
+    std::uintmax_t max_size = std::numeric_limits<std::uintmax_t>::max();
+    if (!min_size_str.empty()) {
+        const std::string error = parseSize(min_size_str, min_size);
+        if (!error.empty()) return usageError(error);
+    }
+    if (!max_size_str.empty()) {
+        const std::string error = parseSize(max_size_str, max_size);
+        if (!error.empty()) return usageError(error);
+    }
+    if (min_size > max_size) {
+        return usageError("--min-size (" + min_size_str + ") is larger than --max-size (" +
+                          max_size_str + ")");
+    }
+
+    // --newer-than: a relative window or an absolute date.
+    bool newer_than_enabled = false;
+    std::chrono::seconds newer_than{0};
+    std::string newer_than_date;
+    if (!newer_than_str.empty()) {
+        const std::string error =
+            parseNewerThan(newer_than_str, newer_than_enabled, newer_than, newer_than_date);
+        if (!error.empty()) return usageError(error);
+    }
+
     ParseResult result;
     result.should_run = true;
     result.options.query = std::move(query);
@@ -212,6 +370,11 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
     result.options.include_hidden = include_hidden;
     result.options.follow_symlinks = follow_symlinks;
     result.options.count_only = count_only;
+    result.options.min_size = min_size;
+    result.options.max_size = max_size;
+    result.options.newer_than_enabled = newer_than_enabled;
+    result.options.newer_than = newer_than;
+    result.options.newer_than_date = std::move(newer_than_date);
     result.options.color = color_mode;
     return result;
 }

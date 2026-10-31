@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -93,6 +94,73 @@ EntryFlags inspectEntry(const fs::directory_entry& entry, const fs::file_status&
     return flags;
 }
 
+// --- Time helpers for --newer-than -----------------------------------------
+//
+// C++17 has no std::chrono::clock_cast, so a system_clock instant cannot be
+// converted to a file_clock instant directly. Both clocks are wall clocks that
+// advance at the same rate, so sampling their current offset once and applying
+// it is enough for a date filter (the error is the sub-second time it takes to
+// read both clocks, which is far below the one-day granularity of an ISO date).
+
+fs::file_time_type systemToFileTime(std::chrono::system_clock::time_point tp) {
+    const auto sys_now = std::chrono::system_clock::now();
+    const auto file_now = fs::file_time_type::clock::now();
+    const auto delta =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(file_now.time_since_epoch()) -
+        std::chrono::duration_cast<std::chrono::nanoseconds>(sys_now.time_since_epoch());
+    const auto target =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(tp.time_since_epoch()) + delta;
+    return fs::file_time_type(std::chrono::duration_cast<fs::file_time_type::duration>(target));
+}
+
+bool isLeapYear(int year) {
+    return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+}
+
+int daysInMonth(int year, int month) {
+    static const int lengths[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (month == 2 && isLeapYear(year)) return 29;
+    return lengths[month - 1];
+}
+
+// Parses "YYYY-MM-DD" as local midnight and returns it on the filesystem clock.
+// Returns false when the text is not a valid date; the day is checked against
+// the real length of the month, so "2026-02-31" is rejected rather than silently
+// rolled into March.
+bool parseIsoDate(std::string_view text, fs::file_time_type& out) {
+    if (text.size() != 10 || text[4] != '-' || text[7] != '-') return false;
+
+    const auto digits = [](std::string_view s, std::size_t offset, std::size_t count, int& value) {
+        value = 0;
+        for (std::size_t i = 0; i < count; ++i) {
+            const char c = s[offset + i];
+            if (c < '0' || c > '9') return false;
+            value = value * 10 + (c - '0');
+        }
+        return true;
+    };
+
+    int year = 0;
+    int month = 0;
+    int day = 0;
+    if (!digits(text, 0, 4, year) || !digits(text, 5, 2, month) || !digits(text, 8, 2, day)) {
+        return false;
+    }
+    if (month < 1 || month > 12) return false;
+    if (day < 1 || day > daysInMonth(year, month)) return false;
+
+    std::tm tm{};
+    tm.tm_year = year - 1900;
+    tm.tm_mon = month - 1;
+    tm.tm_mday = day;
+    tm.tm_isdst = -1;  // let mktime decide whether DST applies to that date
+    const std::time_t local = std::mktime(&tm);
+    if (local == static_cast<std::time_t>(-1)) return false;
+
+    out = systemToFileTime(std::chrono::system_clock::from_time_t(local));
+    return true;
+}
+
 }  // namespace
 
 namespace hyperfinder {
@@ -112,6 +180,23 @@ FileSearcher::FileSearcher(Options opts)
                  : std::regex()),
       rootPath(fs::u8path(options.root)),
       pool(options.threads == 0 ? ThreadPool::defaultThreadCount() : options.threads) {
+    // Resolve the --newer-than cutoff once, before any worker starts. A relative
+    // window is measured back from "now" on the file clock; an ISO date is local
+    // midnight of that day, converted from the system clock. The CLI validates
+    // the date, so a bad value here means the two layers disagree; throw rather
+    // than silently matching everything.
+    if (options.newer_than_enabled) {
+        if (!options.newer_than_date.empty()) {
+            if (!parseIsoDate(options.newer_than_date, cutoff_)) {
+                throw std::invalid_argument("invalid --newer-than date: " +
+                                            options.newer_than_date);
+            }
+        } else {
+            cutoff_ = fs::file_time_type::clock::now() - options.newer_than;
+        }
+        has_cutoff_ = true;
+    }
+
     // Normalise the separator style once, at the root. std::filesystem appends
     // the native separator to whatever form the parent path already has, so a
     // root written as "C:/data" produced results like "C:/data\sub\file.txt".
@@ -147,6 +232,34 @@ bool FileSearcher::nameMatches(const std::string& filename) const {
             return std::regex_search(filename, regex_);
     }
     return false;  // unreachable
+}
+
+bool FileSearcher::passesSizeAndTime(const fs::path& path) {
+    const bool size_filter = options.min_size > 0 ||
+                             options.max_size != std::numeric_limits<std::uintmax_t>::max();
+    if (size_filter) {
+        std::error_code ec;
+        const std::uintmax_t size = fs::file_size(path, ec);
+        if (ec) {
+            skippedPaths.fetch_add(1);
+            return false;
+        }
+        if (size < options.min_size || size > options.max_size) return false;
+    }
+
+    if (has_cutoff_) {
+        std::error_code ec;
+        const fs::file_time_type mtime = fs::last_write_time(path, ec);
+        if (ec) {
+            skippedPaths.fetch_add(1);
+            return false;
+        }
+        // "Newer than X" includes X itself, so a file touched exactly at the
+        // cutoff is reported.
+        if (mtime < cutoff_) return false;
+    }
+
+    return true;
 }
 
 void FileSearcher::scanDirectory(const fs::path& path, std::size_t depth) {
@@ -218,7 +331,8 @@ void FileSearcher::scanDirectory(const fs::path& path, std::size_t depth) {
                     }
                 } else if (resolved && fs::is_regular_file(effective)) {
                     filesScanned.fetch_add(1);
-                    if (matchesExtension(name, options.extensions) && nameMatches(name)) {
+                    if (matchesExtension(name, options.extensions) && nameMatches(name) &&
+                        passesSizeAndTime(entry.path())) {
                         found.push_back(entry.path().u8string());
                     }
                 }

@@ -341,6 +341,11 @@ TEST_CASE("--help lists the new options") {
     CHECK(result.stdout_text.find("--follow-symlinks") != std::string::npos);
     CHECK(result.stdout_text.find("--count") != std::string::npos);
     CHECK(result.stdout_text.find("--color") != std::string::npos);
+    CHECK(result.stdout_text.find("--min-size") != std::string::npos);
+    CHECK(result.stdout_text.find("--max-size") != std::string::npos);
+    CHECK(result.stdout_text.find("--newer-than") != std::string::npos);
+    CHECK(result.stdout_text.find("--glob") != std::string::npos);
+    CHECK(result.stdout_text.find("--regex") != std::string::npos);
 }
 
 // ---------------------------------------------------------------------------
@@ -373,4 +378,65 @@ TEST_CASE("--glob and --regex cannot be combined") {
 
     CHECK_FALSE(result.should_run);
     CHECK(result.exit_code == 2);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: size and modification-time filters
+// ---------------------------------------------------------------------------
+
+TEST_CASE("--min-size and --max-size parse decimal units") {
+    const auto result = parse({"--min-size", "10k", "--max-size", "5M", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.min_size == 10000);
+    CHECK(result.options.max_size == 5000000);
+}
+
+TEST_CASE("--min-size accepts a G suffix and a trailing b") {
+    const auto gigabytes = parse({"--min-size", "2G", "needle"});
+    REQUIRE(gigabytes.should_run);
+    CHECK(gigabytes.options.min_size == 2000000000);
+
+    const auto kilobytes = parse({"--max-size", "10kb", "needle"});
+    REQUIRE(kilobytes.should_run);
+    CHECK(kilobytes.options.max_size == 10000);
+}
+
+TEST_CASE("an invalid size is a usage error") {
+    const auto result = parse({"--min-size", "abc", "needle"});
+
+    CHECK_FALSE(result.should_run);
+    CHECK(result.exit_code == 2);
+}
+
+TEST_CASE("--min-size larger than --max-size is a usage error") {
+    const auto result = parse({"--min-size", "10M", "--max-size", "1k", "needle"});
+
+    CHECK_FALSE(result.should_run);
+    CHECK(result.exit_code == 2);
+}
+
+TEST_CASE("--newer-than parses a duration") {
+    const auto result = parse({"--newer-than", "7d", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.newer_than_enabled);
+    CHECK(result.options.newer_than.count() == 7 * 24 * 3600);
+    CHECK(result.options.newer_than_date.empty());
+}
+
+TEST_CASE("--newer-than parses an ISO date") {
+    const auto result = parse({"--newer-than", "2026-01-31", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.newer_than_enabled);
+    CHECK(result.options.newer_than_date == "2026-01-31");
+}
+
+TEST_CASE("an invalid --newer-than is a usage error") {
+    const auto bad_unit = parse({"--newer-than", "7x", "needle"});
+    CHECK(bad_unit.exit_code == 2);
+
+    const auto bad_date = parse({"--newer-than", "2026-13-01", "needle"});
+    CHECK(bad_date.exit_code == 2);
 }

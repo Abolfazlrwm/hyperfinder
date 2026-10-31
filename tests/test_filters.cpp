@@ -5,9 +5,11 @@
 #include "temp_tree.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <regex>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -314,6 +316,84 @@ TEST_CASE("Matching: an invalid regex is reported as an error") {
     options.match_mode = MatchMode::Regex;
 
     CHECK_THROWS_AS(FileSearcher searcher(options), std::regex_error);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: size and modification-time filters
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Filters: --min-size keeps only large enough files") {
+    TempTree tree("minsize");
+    tree.makeFile("small.txt", std::string(10, 'a'));
+    tree.makeFile("big.txt", std::string(100, 'b'));
+
+    Options options = optionsFor("txt", tree.root());
+    options.min_size = 50;
+
+    CHECK(baseNames(search(options)) == std::vector<std::string>{"big.txt"});
+}
+
+TEST_CASE("Filters: --max-size keeps only small enough files") {
+    TempTree tree("maxsize");
+    tree.makeFile("small.txt", std::string(10, 'a'));
+    tree.makeFile("big.txt", std::string(100, 'b'));
+
+    Options options = optionsFor("txt", tree.root());
+    options.max_size = 50;
+
+    CHECK(baseNames(search(options)) == std::vector<std::string>{"small.txt"});
+}
+
+TEST_CASE("Filters: size bounds are inclusive") {
+    TempTree tree("sizeinclusive");
+    tree.makeFile("exact.txt", std::string(50, 'a'));
+
+    Options options = optionsFor("txt", tree.root());
+    options.min_size = 50;
+    options.max_size = 50;
+
+    CHECK(baseNames(search(options)) == std::vector<std::string>{"exact.txt"});
+}
+
+TEST_CASE("Filters: --newer-than excludes an old file") {
+    TempTree tree("newerrel");
+    const fs::path old_file = tree.makeFile("old.txt", "x");
+    tree.makeFile("new.txt", "x");
+
+    // Push one file ten days into the past; the other keeps its creation time.
+    std::error_code ec;
+    fs::last_write_time(old_file, fs::file_time_type::clock::now() - std::chrono::hours(24 * 10),
+                        ec);
+    REQUIRE_FALSE(ec);
+
+    Options options = optionsFor("txt", tree.root());
+    options.newer_than_enabled = true;
+    options.newer_than = std::chrono::hours(24 * 7);  // one week
+
+    CHECK(baseNames(search(options)) == std::vector<std::string>{"new.txt"});
+}
+
+TEST_CASE("Filters: --newer-than accepts an ISO date") {
+    TempTree tree("newerdate");
+    tree.makeFile("a.txt", "x");
+
+    Options past = optionsFor("txt", tree.root());
+    past.newer_than_enabled = true;
+    past.newer_than_date = "2000-01-01";
+    CHECK(search(past).size() == 1);
+
+    Options future = optionsFor("txt", tree.root());
+    future.newer_than_enabled = true;
+    future.newer_than_date = "2999-01-01";
+    CHECK(search(future).size() == 0);
+}
+
+TEST_CASE("Filters: an invalid --newer-than date is rejected") {
+    Options options = optionsFor("txt", fs::path("."));
+    options.newer_than_enabled = true;
+    options.newer_than_date = "2026-02-31";  // February has no 31st
+
+    CHECK_THROWS_AS(FileSearcher searcher(options), std::invalid_argument);
 }
 
 TEST_CASE("Filters: results are sorted") {

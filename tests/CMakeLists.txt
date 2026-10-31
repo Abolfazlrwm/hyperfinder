@@ -218,6 +218,46 @@ hyperfinder_cli_test(cli_invalid_regex
     CODE 2 ARGS --regex|*abc|${HYPERFINDER_CLI_FIXTURE}
     EMPTY_STDOUT STDERR "error:")
 
+# ---------------------------------------------------------------------------
+# Step 2: size and modification-time filters
+#
+# Every fixture file is tiny (25-26 bytes, depending on whether CMake writes LF
+# or CRLF) and was written at configure time. The sizes below are deliberately
+# far from that boundary so the counts are identical on every platform; the
+# exact inclusive boundary is covered by the C++ unit tests instead.
+# ---------------------------------------------------------------------------
+hyperfinder_cli_test(cli_min_size_excludes_small
+    CODE 1 ARGS --count|--min-size|1k|.|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 0)
+
+hyperfinder_cli_test(cli_max_size_keeps_all
+    CODE 0 ARGS --count|--max-size|1k|.|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 10)
+
+hyperfinder_cli_test(cli_min_size_keeps_all
+    CODE 0 ARGS --count|--min-size|1|.|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 10)
+
+hyperfinder_cli_test(cli_max_size_excludes_all
+    CODE 1 ARGS --count|--max-size|1|.|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 0)
+
+hyperfinder_cli_test(cli_newer_than_past_date
+    CODE 0 ARGS --count|--newer-than|2000-01-01|.|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 10)
+
+hyperfinder_cli_test(cli_newer_than_future_date
+    CODE 1 ARGS --count|--newer-than|2999-01-01|.|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 0)
+
+hyperfinder_cli_test(cli_invalid_size
+    CODE 2 ARGS --min-size|abc|needle|${HYPERFINDER_CLI_FIXTURE}
+    EMPTY_STDOUT STDERR "size")
+
+hyperfinder_cli_test(cli_invalid_newer_than
+    CODE 2 ARGS --newer-than|7x|needle|${HYPERFINDER_CLI_FIXTURE}
+    EMPTY_STDOUT STDERR "unit")
+
 # Removing every escape from the --color=always output yields the --color=never
 # output byte for byte.
 add_test(NAME cli_color_strip

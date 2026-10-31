@@ -1,7 +1,10 @@
 #ifndef HYPERFINDER_OPTIONS_H
 #define HYPERFINDER_OPTIONS_H
 
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -63,6 +66,19 @@ struct Options {
 
     // Hidden entries are skipped unless this is set.
     bool include_hidden = false;
+
+    // File size bounds in bytes, inclusive. The defaults are unbounded: 0 and
+    // the largest representable size.
+    std::uintmax_t min_size = 0;
+    std::uintmax_t max_size = std::numeric_limits<std::uintmax_t>::max();
+
+    // Only report files whose modification time is at or after the cutoff.
+    // When newer_than_date is a non-empty ISO "YYYY-MM-DD", the cutoff is local
+    // midnight of that day; otherwise it is `newer_than` seconds before the
+    // search starts.
+    bool newer_than_enabled = false;
+    std::chrono::seconds newer_than{0};
+    std::string newer_than_date;
 
     // Follow directory links. Off by default, because a cycle would otherwise
     // make the scan run forever.
