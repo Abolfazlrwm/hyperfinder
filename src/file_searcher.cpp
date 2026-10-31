@@ -102,18 +102,26 @@ EntryFlags inspectEntry(const fs::directory_entry& entry, const fs::file_status&
 // C++17 has no std::chrono::clock_cast, so a system_clock instant cannot be
 // converted to a file_clock instant directly. Both clocks are wall clocks that
 // advance at the same rate, so sampling their current offset once and applying
-// it is enough for a date filter (the error is the sub-second time it takes to
-// read both clocks, which is far below the one-day granularity of an ISO date).
+// it is enough for a date filter.
+//
+// Everything is done in whole seconds on purpose. std::filesystem::file_time_type
+// is nanosecond-based on libstdc++, and int64 nanoseconds overflow in 2262, so a
+// cutoff like 2999-01-01 cannot be represented as a file_time_type at all
+// (system_clock::from_time_t would overflow while scaling seconds to
+// nanoseconds). Seconds are plenty for a one-day-granularity filter.
 
-fs::file_time_type systemToFileTime(std::chrono::system_clock::time_point tp) {
+// Offset between the file clock and the system clock, in whole seconds.
+std::int64_t fileClockOffsetSeconds() {
     const auto sys_now = std::chrono::system_clock::now();
     const auto file_now = fs::file_time_type::clock::now();
-    const auto delta =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(file_now.time_since_epoch()) -
-        std::chrono::duration_cast<std::chrono::nanoseconds>(sys_now.time_since_epoch());
-    const auto target =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(tp.time_since_epoch()) + delta;
-    return fs::file_time_type(std::chrono::duration_cast<fs::file_time_type::duration>(target));
+    return std::chrono::duration_cast<std::chrono::seconds>(file_now.time_since_epoch()).count() -
+           std::chrono::duration_cast<std::chrono::seconds>(sys_now.time_since_epoch()).count();
+}
+
+// Converts a system-clock time_t (seconds since the Unix epoch) to seconds on
+// the file clock.
+std::int64_t systemSecondsToFileSeconds(std::time_t system_seconds) {
+    return static_cast<std::int64_t>(system_seconds) + fileClockOffsetSeconds();
 }
 
 bool isLeapYear(int year) {
@@ -126,11 +134,11 @@ int daysInMonth(int year, int month) {
     return lengths[month - 1];
 }
 
-// Parses "YYYY-MM-DD" as local midnight and returns it on the filesystem clock.
-// Returns false when the text is not a valid date; the day is checked against
-// the real length of the month, so "2026-02-31" is rejected rather than silently
-// rolled into March.
-bool parseIsoDate(std::string_view text, fs::file_time_type& out) {
+// Parses "YYYY-MM-DD" as local midnight and returns it in whole seconds on the
+// file clock. Returns false when the text is not a valid date; the day is
+// checked against the real length of the month, so "2026-02-31" is rejected
+// rather than silently rolled into March.
+bool parseIsoDate(std::string_view text, std::int64_t& out_seconds) {
     if (text.size() != 10 || text[4] != '-' || text[7] != '-') return false;
 
     const auto digits = [](std::string_view s, std::size_t offset, std::size_t count, int& value) {
@@ -160,7 +168,7 @@ bool parseIsoDate(std::string_view text, fs::file_time_type& out) {
     const std::time_t local = std::mktime(&tm);
     if (local == static_cast<std::time_t>(-1)) return false;
 
-    out = systemToFileTime(std::chrono::system_clock::from_time_t(local));
+    out_seconds = systemSecondsToFileSeconds(local);
     return true;
 }
 
@@ -232,12 +240,15 @@ FileSearcher::FileSearcher(Options opts)
     // than silently matching everything.
     if (options.newer_than_enabled) {
         if (!options.newer_than_date.empty()) {
-            if (!parseIsoDate(options.newer_than_date, cutoff_)) {
+            if (!parseIsoDate(options.newer_than_date, cutoff_seconds_)) {
                 throw std::invalid_argument("invalid --newer-than date: " +
                                             options.newer_than_date);
             }
         } else {
-            cutoff_ = fs::file_time_type::clock::now() - options.newer_than;
+            cutoff_seconds_ =
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    fs::file_time_type::clock::now().time_since_epoch()).count() -
+                options.newer_than.count();
         }
         has_cutoff_ = true;
     }
@@ -299,9 +310,11 @@ bool FileSearcher::passesSizeAndTime(const fs::path& path) {
             skippedPaths.fetch_add(1);
             return false;
         }
+        const std::int64_t mtime_seconds =
+            std::chrono::duration_cast<std::chrono::seconds>(mtime.time_since_epoch()).count();
         // "Newer than X" includes X itself, so a file touched exactly at the
         // cutoff is reported.
-        if (mtime < cutoff_) return false;
+        if (mtime_seconds < cutoff_seconds_) return false;
     }
 
     return true;

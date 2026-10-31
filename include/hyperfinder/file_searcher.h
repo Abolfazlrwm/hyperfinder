@@ -106,11 +106,12 @@ private:
     // turns into exit code 2.
     std::regex regex_;
 
-    // True when options.newer_than_enabled is set. The cutoff is an absolute
-    // file-clock instant: relative windows are measured back from "now", while
-    // an ISO date is converted through the system clock (see file_searcher.cpp).
+    // True when options.newer_than_enabled is set. The cutoff is stored as whole
+    // seconds on the file clock: a nanosecond file_time_type cannot represent
+    // dates past ~2262 (int64 nanoseconds overflow), and a year-2999 cutoff is a
+    // reasonable thing to ask for. Comparing in seconds sidesteps that.
     bool has_cutoff_ = false;
-    fs::file_time_type cutoff_{};
+    std::int64_t cutoff_seconds_ = 0;
 
     fs::path rootPath;
     std::vector<std::string> matches;
