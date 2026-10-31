@@ -11,13 +11,17 @@ walking it sequentially.
 ## Features
 
 - Multi-threaded traversal with a fixed-size worker pool
-- Case-insensitive substring matching on file names, or `--case-sensitive`
+- Case-insensitive matching on file names, or `--case-sensitive`
+- Three matching modes: substring (default), `--glob`, and `--regex`
 - Filters: `--max-depth`, `--ext`, `--exclude`, `--hidden`
+- Size and age filters: `--min-size`, `--max-size`, `--newer-than`
+- `--content` searches inside files and reports `path:line:text`
 - `--follow-symlinks` with cycle detection (off by default)
 - Deterministic, sorted output
+- Machine output: `--json` (NDJSON) and `--print0`
 - Clean pipes: results on stdout, summary and warnings on stderr
 - Exit codes that distinguish "no match" from "could not run"
-- UTF-8 paths and arguments, including on Windows
+- UTF-8 paths, arguments and file contents, including on Windows
 - Colour on a terminal, plain text everywhere else
 
 ## Build
@@ -81,11 +85,13 @@ target_link_libraries(app PRIVATE hyperfinder::core)
 ## Usage
 
 ```
-hyperfinder [OPTIONS] query [path]
+hyperfinder [OPTIONS] [NAME-QUERY] [PATH]
 ```
 
-`query` is matched against the file name, not the path. `path` defaults to the
-current directory.
+`NAME-QUERY` is matched against the file name, not the path. `PATH` defaults to
+the current directory. With `--content`, a single positional is taken as `PATH`,
+because the name query is usually omitted then; two positionals are still an
+optional name query followed by the path.
 
 Given this tree:
 
@@ -126,6 +132,29 @@ $ hyperfinder --count --ext hpp . .
 1 match, 3 files, 2 directories scanned in 0.0006955 s
 ```
 
+`--glob` and `--regex` change how the query is interpreted; they reject each
+other:
+
+```console
+$ hyperfinder --glob "*.hpp" .
+$ hyperfinder --regex "^main\.(cpp|hpp)$" .
+```
+
+`--content` searches inside files. A single positional is the directory to
+search, and each matching line is printed as `path:line:text`:
+
+```console
+$ hyperfinder --content TODO --ext cpp src
+.\src\main.cpp:42:    // TODO: replace the stub
+1 match, 2 files, 2 directories scanned in 0.0011023 s
+```
+
+Size and age narrow the candidate set before a file is even opened:
+
+```console
+$ hyperfinder --min-size 10k --max-size 2M --newer-than 7d . .
+```
+
 ### Options
 
 | Option | Effect |
@@ -133,12 +162,21 @@ $ hyperfinder --count --ext hpp . .
 | `-j, --threads N` | worker threads; `0` (the default) means one per hardware thread |
 | `-i, --ignore-case` | match case-insensitively (the default; the flag states intent) |
 | `--case-sensitive` | match case-sensitively |
+| `--glob` | treat the query as a glob (`*` and `?` wildcards) |
+| `--regex` | treat the query as an ECMAScript regular expression |
 | `--max-depth N` | directory levels to descend; `0` means the entries directly inside the root; default unlimited |
 | `--ext EXT` | keep one extension, with or without the dot; repeatable |
 | `--exclude GLOB` | skip entries whose name matches the glob; repeatable |
 | `--hidden` | include hidden files and descend into hidden directories |
+| `--min-size SIZE` | minimum size in bytes, with an optional `k`, `M` or `G` suffix (decimal) |
+| `--max-size SIZE` | maximum size in bytes, same suffixes |
+| `--newer-than WHEN` | modified within a window (`7d`, `12h`, `30m`, ... with `s`/`m`/`h`/`d`/`w`) or on/after a date (`YYYY-MM-DD`) |
+| `--content TEXT` | only report files whose contents contain `TEXT`; prints `path:line:text` |
+| `--content-max-size SIZE` | skip content search in files larger than this (default `16M`) |
 | `--follow-symlinks` | follow directory links, with cycle detection |
-| `--count` | print only the number of matches |
+| `--count` | print only the number of matches (matching lines with `--content`) |
+| `--json` | one JSON object per line (NDJSON) |
+| `--print0` | NUL-terminated records, for `xargs -0` |
 | `--color WHEN` | `auto` (default), `always` or `never` |
 | `--no-color` | same as `--color=never` |
 | `-h, --help` | usage |
@@ -147,7 +185,16 @@ $ hyperfinder --count --ext hpp . .
 ### Output contract
 
 - **stdout** carries matching paths, one per line, and nothing else. With
-  `--count` it carries only the number.
+  `--count` it carries only the number; with `--content` each record is
+  `path:line:text` and `--count` counts matching lines rather than files.
+- `--json` writes one object per line instead:
+  `{"path":"..."}` for name matches, and
+  `{"path":"...","line":N,"text":"..."}` for content matches. Strings are
+  escaped to valid JSON; invalid UTF-8 becomes U+FFFD.
+- `--print0` terminates each record with a NUL byte instead of a newline, for
+  `xargs -0`. A content record is `path:line:text`.
+- `--json` and `--print0` reject each other, and neither can be combined with
+  `--count`. Neither format is coloured.
 - **stderr** carries the summary, warnings about skipped paths, and errors.
 - Line endings are `\n` on every platform, including when stdout is redirected
   on Windows.
@@ -180,6 +227,27 @@ are deliberately narrower than "Unicode support" would suggest.
   zero or more characters, `?` matches exactly one *UTF-8 code point* (so `???`
   matches the three-letter name `علی`), and everything else is literal. A
   matching directory is never entered, not merely filtered from the results.
+- **`--glob` uses the same matcher as `--exclude`**, applied to the query instead
+  of the exclude list.
+- **`--regex` is an ECMAScript regex** (the grammar `std::regex` implements),
+  matched with `regex_search`, so it is not anchored: `log` matches `build.log`
+  and `^log` matches only names that start with `log`. Under the default
+  case-insensitive mode the `icase` flag folds ASCII only, like the rest of the
+  tool. An invalid pattern is a usage error (exit 2). RE2 was considered and not
+  adopted: it would be faster and immune to backtracking, but it is a separate
+  external library to fetch and link for matching short file names.
+- **`--content` is a literal substring**, not a pattern, searched line by line
+  and folded the same ASCII-only way. A file is skipped as binary if a NUL byte
+  appears in its first 8 KiB, and files above `--content-max-size` (16 MiB by
+  default) are not read. A trailing CR is stripped, so CRLF files print cleanly,
+  the last line of a file without a trailing newline is still searched, and a
+  line longer than 200 bytes is truncated with `...` at a UTF-8 boundary.
+- **Size suffixes are decimal**: `10k` is 10,000 bytes, `5M` is 5,000,000, `1G`
+  is 1,000,000,000. Both bounds are inclusive.
+- **`--newer-than` accepts a window or a date.** `7d` means "modified in the last
+  seven days"; `2026-01-31` means "modified on or after local midnight of that
+  day". The day is checked against the real month length, so `2026-02-31` is
+  rejected rather than rolled into March.
 - **Hidden** means a leading dot on POSIX. On Windows it means a leading dot or
   the `FILE_ATTRIBUTE_HIDDEN` attribute, which is what Explorer's "Hidden"
   checkbox sets.
@@ -222,6 +290,10 @@ CMake scripts for the executable, all registered with CTest.
 | Tree shapes | deep tree, 3000 files in one directory |
 | Links | symlink and junction cycles, followed and not followed |
 | Filters | depth, extension, exclude globs, hidden files and directories |
+| Matching modes | glob and regex queries, invalid regex, case sensitivity, a Persian regex |
+| Size and time | min/max size, inclusive bounds, a back-dated file, relative and date cutoffs |
+| Content search | line numbers, a match across a chunk boundary, CRLF, binary skip, long-line truncation, UTF-8 |
+| Output formats | JSON escaping (control chars, invalid UTF-8) and a byte-level `--print0` check |
 | Glob matcher | `*`, `?`, literals, empty pattern, `a*a*a*a*a*b`, UTF-8 code points |
 | UTF-8 | Persian, accented and emoji names, end to end |
 | Thread pool | `waitIdle`, nested enqueue, single-worker nesting, future values, exception propagation, destruction while idle and with pending work |
@@ -272,13 +344,30 @@ CMake 4.4.4, Ninja**.
 - **Windows scans are slower than Linux ones.** The reparse-point check that
   keeps junctions from being followed costs one `GetFileAttributesW` per entry.
   A `FindFirstFileExW`-based walk is planned for the performance phase.
-- **Case folding is ASCII-only** (see above), and matching is a plain substring
-  test on the file name: no regex, no glob matching, and nothing is read from
-  file contents yet.
+- **Case folding is ASCII-only** (see above), for file names and for
+  `--content` alike: `Straße`/`STRASSE` and `CAFÉ`/`café` do not match.
+- **`.gitignore` rules are not applied.** This is a deliberate decision, not an
+  oversight; see the note below.
 - **`--exclude` matches names, not paths**, so `--exclude build/*` does not mean
   what it does in a shell; exclude the directory name instead.
 - Following a link makes the same file reachable under two names, and both are
   reported; only directory cycles are suppressed.
+
+### Why `.gitignore` is not supported yet
+
+Tools like `fd` and `ripgrep` skip paths that a repository's `.gitignore` rules
+exclude, and that is genuinely useful. Implementing it correctly is harder than
+it looks: the full semantics include negation (`!pattern`), anchoring (`/`),
+directory-only patterns (trailing `/`), nested `.gitignore` files that apply only
+below their own directory, precedence between files, `**` globs, and the global
+and per-repository excludes in `.git/config`. A partial implementation that
+handles the common cases but silently gets precedence or negation wrong is worse
+than none: it hides files a user expects to find and gives no indication why.
+
+So `hyperfinder` does not read `.gitignore` yet. Until it does, the explicit
+`--exclude` flag is the supported way to prune a tree, and it does exactly what
+it says. A correct `.gitignore` implementation is on the roadmap; a half-correct
+one is not.
 
 ## License
 
