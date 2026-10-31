@@ -342,3 +342,35 @@ TEST_CASE("--help lists the new options") {
     CHECK(result.stdout_text.find("--count") != std::string::npos);
     CHECK(result.stdout_text.find("--color") != std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5: matching modes
+// ---------------------------------------------------------------------------
+
+TEST_CASE("the default match mode is substring") {
+    const auto result = parse({"needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.match_mode == hyperfinder::MatchMode::Substring);
+}
+
+TEST_CASE("--glob selects glob matching") {
+    const auto result = parse({"--glob", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.match_mode == hyperfinder::MatchMode::Glob);
+}
+
+TEST_CASE("--regex selects regex matching") {
+    const auto result = parse({"--regex", "needle"});
+
+    REQUIRE(result.should_run);
+    CHECK(result.options.match_mode == hyperfinder::MatchMode::Regex);
+}
+
+TEST_CASE("--glob and --regex cannot be combined") {
+    const auto result = parse({"--glob", "--regex", "needle"});
+
+    CHECK_FALSE(result.should_run);
+    CHECK(result.exit_code == 2);
+}

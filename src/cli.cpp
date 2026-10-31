@@ -21,7 +21,8 @@ namespace {
 
 constexpr const char* kDescription =
     "Multi-threaded file finder. Walks a directory tree and reports every file "
-    "whose name contains the given substring.";
+    "whose name matches the given pattern (a substring by default; --glob or "
+    "--regex for other kinds).";
 
 constexpr const char* kFooter =
     "Output: matching paths are written to stdout, one per line, and nothing "
@@ -68,6 +69,8 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
     std::size_t threads = 0;
     bool ignore_case_flag = false;
     bool case_sensitive_flag = false;
+    bool glob_flag = false;
+    bool regex_flag = false;
     std::size_t max_depth = kUnlimitedDepth;
     std::vector<std::string> exclude;
     std::vector<std::string> extensions;
@@ -92,6 +95,17 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
         app.add_flag("--case-sensitive", case_sensitive_flag, "Match case-sensitively");
     ignore_case_option->excludes(case_sensitive_option);
     case_sensitive_option->excludes(ignore_case_option);
+
+    // The query can be a substring (default), a glob, or a regex, but never two
+    // at once; the two flags reject each other.
+    auto* glob_option =
+        app.add_flag("--glob", glob_flag,
+                     "Treat the query as a glob (* and ? wildcards), not a substring");
+    auto* regex_option =
+        app.add_flag("--regex", regex_flag,
+                     "Treat the query as a regular expression (matched against the file name)");
+    glob_option->excludes(regex_option);
+    regex_option->excludes(glob_option);
 
     app.add_option(
         "--max-depth", max_depth,
@@ -181,6 +195,11 @@ ParseResult parseArguments(const std::vector<std::string>& args) {
     result.options.threads = threads;
     result.options.ignore_case = !case_sensitive_flag;
     result.options.max_depth = max_depth;
+    if (regex_flag) {
+        result.options.match_mode = hyperfinder::MatchMode::Regex;
+    } else if (glob_flag) {
+        result.options.match_mode = hyperfinder::MatchMode::Glob;
+    }
     result.options.exclude = std::move(exclude);
 
     // Normalise once here so the hot path only compares ready-made strings, and

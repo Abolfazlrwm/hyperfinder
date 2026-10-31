@@ -18,14 +18,25 @@ enum class ColorMode {
     Never,
 };
 
+// How the query is matched against a file name.
+enum class MatchMode {
+    Substring,  // default: the query is a literal substring
+    Glob,       // the query is a shell-style glob (* and ? wildcards)
+    Regex,      // the query is an ECMAScript regular expression, matched against
+                // the file name (not the full path)
+};
+
 // Everything the command line can change, in the form the core library needs.
 //
 // Deliberately a plain aggregate with no parsing, no I/O and no OS calls: the
 // command-line layer fills it in, tests can build one by hand, and the search
 // code never has to know that a command line exists.
 struct Options {
-    // Substring to look for in file names.
+    // Substring / glob / regex to look for in file names, depending on match_mode.
     std::string query;
+
+    // How `query` is interpreted.
+    MatchMode match_mode = MatchMode::Substring;
 
     // Directory to search, as UTF-8.
     std::string root = ".";

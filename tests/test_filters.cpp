@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <regex>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,7 @@
 using hf_test::TempTree;
 using hyperfinder::FileSearcher;
 using hyperfinder::kUnlimitedDepth;
+using hyperfinder::MatchMode;
 using hyperfinder::Options;
 
 namespace {
@@ -238,6 +240,80 @@ TEST_CASE("Filters: an --exclude glob matches a non-ASCII name") {
     options.exclude = {"???.*"};  // three code points, then a dot
 
     CHECK(baseNames(search(options)) == std::vector<std::string>{"keep.txt"});
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: matching modes
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Matching: a glob query matches by wildcard") {
+    TempTree tree("globmode");
+    tree.makeFile("a.txt");
+    tree.makeFile("a.log");
+    tree.makeFile("b.txt");
+
+    Options options = optionsFor("*.txt", tree.root());
+    options.match_mode = MatchMode::Glob;
+
+    const std::vector<std::string> names = baseNames(search(options));
+    CHECK(names.size() == 2);
+    CHECK(std::find(names.begin(), names.end(), "a.txt") != names.end());
+    CHECK(std::find(names.begin(), names.end(), "b.txt") != names.end());
+}
+
+TEST_CASE("Matching: a glob is case-insensitive under the default -i") {
+    TempTree tree("globci");
+    tree.makeFile("A.TXT");
+    tree.makeFile("b.log");
+
+    Options options = optionsFor("*.txt", tree.root());
+    options.match_mode = MatchMode::Glob;
+
+    CHECK(baseNames(search(options)) == std::vector<std::string>{"A.TXT"});
+}
+
+TEST_CASE("Matching: a regex query matches the file name") {
+    TempTree tree("regexmode");
+    tree.makeFile("build.log");
+    tree.makeFile("build.txt");
+    tree.makeFile("run.sh");
+
+    Options options = optionsFor("^build\\..*txt$", tree.root());
+    options.match_mode = MatchMode::Regex;
+
+    CHECK(baseNames(search(options)) == std::vector<std::string>{"build.txt"});
+}
+
+TEST_CASE("Matching: a regex honours --case-sensitive") {
+    TempTree tree("regexcs");
+    tree.makeFile("Alpha.TXT");
+    tree.makeFile("beta.txt");
+
+    Options options = optionsFor("alpha", tree.root());
+    options.match_mode = MatchMode::Regex;
+    options.ignore_case = false;
+
+    CHECK(search(options).size() == 0);
+}
+
+TEST_CASE("Matching: a Persian regex matches a Persian name") {
+    TempTree tree("regexpersian");
+    tree.makeFile("علی.txt");
+    tree.makeFile("café.txt");
+
+    Options options = optionsFor("علی", tree.root());
+    options.match_mode = MatchMode::Regex;
+
+    CHECK(baseNames(search(options)) == std::vector<std::string>{"علی.txt"});
+}
+
+TEST_CASE("Matching: an invalid regex is reported as an error") {
+    // The pattern is compiled in the FileSearcher constructor, so the failure
+    // surfaces before any directory is touched. The root is irrelevant here.
+    Options options = optionsFor("[", fs::path("."));
+    options.match_mode = MatchMode::Regex;
+
+    CHECK_THROWS_AS(FileSearcher searcher(options), std::regex_error);
 }
 
 TEST_CASE("Filters: results are sorted") {

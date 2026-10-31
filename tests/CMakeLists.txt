@@ -57,8 +57,13 @@ endif()
 # Every case is a call to this function. ARGS is a list of arguments; a '|' is
 # used as the separator when they are handed to the script.
 function(hyperfinder_cli_test name)
-    cmake_parse_arguments(CASE ""
-        "CODE;STDOUT;STDOUT_EXACT;EMPTY_STDOUT;UNEXPECT_STDOUT;STDERR;EMPTY_STDERR;ENV"
+    # EMPTY_STDOUT / EMPTY_STDERR are boolean flags, not values: a bare keyword
+    # marks the assertion. Treating them as one-value keywords made them swallow
+    # the next token, so "EMPTY_STDOUT STDERR <text>" silently dropped the
+    # stderr check.
+    cmake_parse_arguments(CASE
+        "EMPTY_STDOUT;EMPTY_STDERR"
+        "CODE;STDOUT;STDOUT_EXACT;UNEXPECT_STDOUT;STDERR;ENV"
         "ARGS"
         ${ARGN})
 
@@ -197,6 +202,21 @@ hyperfinder_cli_test(cli_color_no_color_env
 hyperfinder_cli_test(cli_color_auto_piped
     CODE 0 ARGS --color=auto|a.txt|${HYPERFINDER_CLI_FIXTURE}
     UNEXPECT_STDOUT "${hyperfinder_escape}")
+
+# ---------------------------------------------------------------------------
+# Step 1: matching modes
+# ---------------------------------------------------------------------------
+hyperfinder_cli_test(cli_glob
+    CODE 0 ARGS --count|--glob|*.txt|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 7)
+
+hyperfinder_cli_test(cli_regex
+    CODE 0 ARGS --count|--regex|^a.*|${HYPERFINDER_CLI_FIXTURE}
+    STDOUT_EXACT 1)
+
+hyperfinder_cli_test(cli_invalid_regex
+    CODE 2 ARGS --regex|*abc|${HYPERFINDER_CLI_FIXTURE}
+    EMPTY_STDOUT STDERR "error:")
 
 # Removing every escape from the --color=always output yields the --color=never
 # output byte for byte.

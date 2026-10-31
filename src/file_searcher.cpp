@@ -100,6 +100,16 @@ namespace hyperfinder {
 FileSearcher::FileSearcher(Options opts)
     : options(std::move(opts)),
       query(options.ignore_case ? toLowerAscii(options.query) : options.query),
+      match_mode_(options.match_mode),
+      // std::regex with ECMAScript grammar and, when case-insensitive, the icase
+      // flag (which folds ASCII only, matching the project's case rule). A bad
+      // pattern throws std::regex_error here; the caller reports it as a usage
+      // error with exit code 2.
+      regex_(match_mode_ == MatchMode::Regex
+                 ? std::regex(options.query, options.ignore_case
+                                                       ? std::regex::ECMAScript | std::regex::icase
+                                                       : std::regex::ECMAScript)
+                 : std::regex()),
       rootPath(fs::u8path(options.root)),
       pool(options.threads == 0 ? ThreadPool::defaultThreadCount() : options.threads) {
     // Normalise the separator style once, at the root. std::filesystem appends
@@ -116,9 +126,27 @@ FileSearcher::FileSearcher(const std::string& q, const fs::path& root)
           return opts;
       }()) {}
 
-bool FileSearcher::containsQuery(const std::string& filename) const {
-    if (!options.ignore_case) return filename.find(query) != std::string::npos;
-    return toLowerAscii(filename).find(query) != std::string::npos;
+bool FileSearcher::nameMatches(const std::string& filename) const {
+    switch (match_mode_) {
+        case MatchMode::Substring:
+            return options.ignore_case ? toLowerAscii(filename).find(query) != std::string::npos
+                                       : filename.find(query) != std::string::npos;
+
+        case MatchMode::Glob: {
+            // Fold both sides when case-insensitive; globMatch is byte-wise, so the
+            // ASCII-only fold keeps multi-byte names intact.
+            const std::string needle =
+                options.ignore_case ? toLowerAscii(options.query) : options.query;
+            const std::string haystack =
+                options.ignore_case ? toLowerAscii(filename) : filename;
+            return globMatch(needle, haystack);
+        }
+
+        case MatchMode::Regex:
+            // regex_search, not full match: a query like "log" matches "build.log".
+            return std::regex_search(filename, regex_);
+    }
+    return false;  // unreachable
 }
 
 void FileSearcher::scanDirectory(const fs::path& path, std::size_t depth) {
@@ -190,7 +218,7 @@ void FileSearcher::scanDirectory(const fs::path& path, std::size_t depth) {
                     }
                 } else if (resolved && fs::is_regular_file(effective)) {
                     filesScanned.fetch_add(1);
-                    if (matchesExtension(name, options.extensions) && containsQuery(name)) {
+                    if (matchesExtension(name, options.extensions) && nameMatches(name)) {
                         found.push_back(entry.path().u8string());
                     }
                 }

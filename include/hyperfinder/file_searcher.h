@@ -6,6 +6,7 @@
 #include <exception>
 #include <filesystem>
 #include <mutex>
+#include <regex>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -60,7 +61,7 @@ private:
     void scanDirectory(const fs::path& path, std::size_t depth);
     void submit(const fs::path& path, std::size_t depth);
     void recordError(std::exception_ptr error);
-    bool containsQuery(const std::string& filename) const;
+    bool nameMatches(const std::string& filename) const;
 
     // Returns true when `directory` was already reached during this search, and
     // records it otherwise. Only used with follow_symlinks, where a link can
@@ -74,6 +75,11 @@ private:
     // options.query, lower-cased once when ignore_case is on, so the hot path
     // does not re-fold the needle for every file.
     std::string query;
+    MatchMode match_mode_;
+    // Compiled pattern, valid only when match_mode_ == MatchMode::Regex. Built in
+    // the constructor; an invalid pattern throws std::regex_error, which main()
+    // turns into exit code 2.
+    std::regex regex_;
     fs::path rootPath;
     std::vector<std::string> matches;
     mutable std::mutex results_mutex;
