@@ -395,6 +395,32 @@ TEST_CASE("Filters: --newer-than accepts an ISO date") {
     CHECK(search(future).size() == 0);
 }
 
+TEST_CASE("Filters: --newer-than compares against the file's real timestamp") {
+    TempTree tree("newerprecise");
+    const fs::path recent = tree.makeFile("recent.txt", "x");
+    const fs::path older = tree.makeFile("older.txt", "x");
+
+    // 30 hours and 9 days back, so a 2-day window has to keep exactly one.
+    std::error_code ec;
+    fs::last_write_time(recent, fs::file_time_type::clock::now() - std::chrono::hours(30), ec);
+    REQUIRE_FALSE(ec);
+    fs::last_write_time(older, fs::file_time_type::clock::now() - std::chrono::hours(24 * 9), ec);
+    REQUIRE_FALSE(ec);
+
+    // The Windows enumerator reads the timestamp out of WIN32_FIND_DATAW instead
+    // of asking for it again, so this pins that conversion against the value
+    // std::filesystem reports - to within a day, not to within a century.
+    Options narrow = optionsFor("txt", tree.root());
+    narrow.newer_than_enabled = true;
+    narrow.newer_than = std::chrono::hours(24 * 2);
+    CHECK(baseNames(search(narrow)) == std::vector<std::string>{"recent.txt"});
+
+    Options wide = optionsFor("txt", tree.root());
+    wide.newer_than_enabled = true;
+    wide.newer_than = std::chrono::hours(24 * 10);
+    CHECK(baseNames(search(wide)).size() == 2);
+}
+
 TEST_CASE("Filters: an invalid --newer-than date is rejected") {
     Options options = optionsFor("txt", fs::path("."));
     options.newer_than_enabled = true;

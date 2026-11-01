@@ -111,3 +111,45 @@ else the profile shows is noise (<1 µs per entry) and is left alone.
   threads is limited by the E-cores and is not a clean N× curve.
 - Times are the tools' own `steady_clock` measurements around the scan, which
   excludes process start-up; wall-clock numbers in the final report include it.
+
+## Outcome
+
+The scan now uses `FindFirstFileExW` + `FindNextFileW` with
+`FIND_FIRST_EX_LARGE_FETCH` and `FindExInfoBasic`, so a directory listing
+returns names, attributes, size and timestamp in one call. The separate
+`GetFileAttributesW` is gone, and so is `recursive_directory_iterator`.
+
+Same tree, same machine, same method, 15 runs, medians, warm cache:
+
+| | before | after | |
+|---|---|---|---|
+| `hyperfinder -j1` | 299.2 ms | **9.6 ms** | 31× |
+| `hyperfinder -j12` | 174.4 ms | **6.6 ms** | 26× |
+| `baseline_walk` | 220.6 ms | 269.0 ms | unchanged code |
+
+`baseline_walk` was not touched, so its two numbers are the same program
+measured twice; the 22 % spread is the run-to-run noise of this machine and is
+the reason every figure here is a median of many runs rather than a single one.
+
+The result set is unchanged: on the same tree, the new enumerator and
+`baseline_walk` produce byte-identical output for all 9,938 non-hidden files.
+
+### What this says about threading
+
+On the 100,000-file tree (200 directories, 11 runs, medians):
+
+| Threads | 1 | 2 | 4 | 8 | 12 |
+|---|---|---|---|---|---|
+| hyperfinder | 112.2 ms | 76.9 ms | 58.8 ms | 61.7 ms | 58.2 ms |
+| speed-up | 1.00× | 1.46× | 1.91× | 1.82× | 1.93× |
+
+Scaling stops at about 1.9× however many threads are used. The work is now
+almost entirely I/O, and the unit of parallelism is one directory: this tree has
+200 of them, each holding 500 files, so 12 workers spend their time queueing
+rather than scanning. Making threads pay from here needs finer-grained work,
+not more threads - which is what Step 3 is for.
+
+`baseline_walk` needs 8,174 ms on the same tree, i.e. 73× the single-threaded
+hyperfinder. That gap is the two effects this profile identified, multiplied:
+the iterator's extra round trips and a stat per entry.
+

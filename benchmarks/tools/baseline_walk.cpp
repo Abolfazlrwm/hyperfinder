@@ -14,6 +14,11 @@
 #include <filesystem>
 #include <string>
 
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -32,6 +37,13 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "usage: baseline_walk <query> <root>\n");
         return 2;
     }
+#if defined(_WIN32)
+    // Write the results exactly as they are, without the text-mode CRLF
+    // translation: hyperfinder writes LF, so a byte-for-byte comparison of the
+    // two outputs has to start from the same encoding.
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
+
     const std::string needle = toLowerAscii(argv[1]);
     const fs::path root = fs::u8path(argv[2]);
 

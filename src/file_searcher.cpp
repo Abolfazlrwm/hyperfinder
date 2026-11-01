@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstring>
 #include <ctime>
+#include <cwchar>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -71,31 +72,48 @@ std::string canonicalKey(const fs::path& directory) {
     return (ec ? directory : canonical).u8string();
 }
 
-// What the scan needs to know about one entry before deciding what to do.
-struct EntryFlags {
-    bool hidden = false;
-    bool link = false;
-};
-
-// On Windows a single GetFileAttributesW answers both questions. It has to be
-// Win32: libstdc++'s symlink_status() resolves the target, so a junction looks
-// like a plain directory and std::filesystem cannot see the reparse point at
-// all. On POSIX symlink_status() already reports links, and the dot convention
-// covers hidden names.
-EntryFlags inspectEntry(const fs::directory_entry& entry, const fs::file_status& link_status,
-                        std::string_view name) {
-    EntryFlags flags;
-    flags.hidden = hyperfinder::isHiddenByName(name);
-    flags.link = fs::is_symlink(link_status);
 #if defined(_WIN32)
-    const DWORD attributes = ::GetFileAttributesW(entry.path().c_str());
-    if (attributes != INVALID_FILE_ATTRIBUTES) {
-        flags.hidden = flags.hidden || (attributes & FILE_ATTRIBUTE_HIDDEN) != 0;
-        flags.link = flags.link || (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
-    }
+// FILETIME counts 100 ns ticks from 1601-01-01, while file_time_type uses an
+// epoch the standard library chooses. Sampling both clocks once gives the
+// offset between them, which is preferable to hard-coding a constant that would
+// be wrong on another implementation.
+std::int64_t fileClockOffset100ns() {
+    static const std::int64_t offset = [] {
+        FILETIME now_filetime;
+        // The precise variant is Windows 8+, and using it only when the target
+        // version declares it keeps this compiling against older SDKs. The
+        // fallback is accurate to ~16 ms, which is far below the one-second
+        // granularity the comparison uses.
+#if defined(_WIN32_WINNT) && (_WIN32_WINNT >= 0x0602)
+        ::GetSystemTimePreciseAsFileTime(&now_filetime);
+#else
+        ::GetSystemTimeAsFileTime(&now_filetime);
 #endif
-    return flags;
+        const std::int64_t now_ticks =
+            (static_cast<std::int64_t>(now_filetime.dwHighDateTime) << 32) |
+            static_cast<std::int64_t>(now_filetime.dwLowDateTime);
+        using hundred_ns = std::chrono::duration<std::int64_t, std::ratio<1, 10000000>>;
+        const std::int64_t file_ticks = std::chrono::duration_cast<hundred_ns>(
+                                            fs::file_time_type::clock::now().time_since_epoch())
+                                            .count();
+        return file_ticks - now_ticks;
+    }();
+    return offset;
 }
+
+// Converts the timestamp FindFirstFileExW already returned into the same whole
+// seconds the rest of the scan compares against, so --newer-than does not need
+// a second call per file.
+std::int64_t filetimeToFileSeconds(const FILETIME& value) {
+    const std::int64_t ticks = (static_cast<std::int64_t>(value.dwHighDateTime) << 32) |
+                               static_cast<std::int64_t>(value.dwLowDateTime);
+    const std::int64_t adjusted = ticks + fileClockOffset100ns();
+    // Floor, not truncation: a pre-epoch timestamp must round down.
+    std::int64_t seconds = adjusted / 10000000;
+    if (adjusted % 10000000 < 0) --seconds;
+    return seconds;
+}
+#endif
 
 // --- Time helpers for --newer-than -----------------------------------------
 //
@@ -267,7 +285,7 @@ FileSearcher::FileSearcher(const std::string& q, const fs::path& root)
           return opts;
       }()) {}
 
-bool FileSearcher::nameMatches(const std::string& filename) const {
+bool FileSearcher::nameMatches(std::string_view filename) const {
     switch (match_mode_) {
         case MatchMode::Substring:
             return options.ignore_case ? toLowerAscii(filename).find(query) != std::string::npos
@@ -278,40 +296,52 @@ bool FileSearcher::nameMatches(const std::string& filename) const {
             // ASCII-only fold keeps multi-byte names intact.
             const std::string needle =
                 options.ignore_case ? toLowerAscii(options.query) : options.query;
+            // One side of the ternary is a string and the other a view, so the
+            // result has to be named explicitly.
             const std::string haystack =
-                options.ignore_case ? toLowerAscii(filename) : filename;
+                options.ignore_case ? toLowerAscii(filename) : std::string(filename);
             return globMatch(needle, haystack);
         }
 
         case MatchMode::Regex:
             // regex_search, not full match: a query like "log" matches "build.log".
-            return std::regex_search(filename, regex_);
+            // The iterator overload is the only one that accepts a string_view,
+            // and it does not copy the name.
+            return std::regex_search(filename.begin(), filename.end(), regex_);
     }
     return false;  // unreachable
 }
 
-bool FileSearcher::passesSizeAndTime(const fs::path& path) {
+bool FileSearcher::passesSizeAndTime(const EntryRecord& entry) {
+    // A stat is only taken for a filter that is actually in use, and never when
+    // the enumerator already returned the value.
     const bool size_filter = options.min_size > 0 ||
                              options.max_size != std::numeric_limits<std::uintmax_t>::max();
     if (size_filter) {
-        std::error_code ec;
-        const std::uintmax_t size = fs::file_size(path, ec);
-        if (ec) {
-            skippedPaths.fetch_add(1);
-            return false;
+        std::uintmax_t size = entry.size;
+        if (!entry.metadata_known) {
+            std::error_code ec;
+            size = fs::file_size(fs::u8path(entry.full), ec);
+            if (ec) {
+                skippedPaths.fetch_add(1);
+                return false;
+            }
         }
         if (size < options.min_size || size > options.max_size) return false;
     }
 
     if (has_cutoff_) {
-        std::error_code ec;
-        const fs::file_time_type mtime = fs::last_write_time(path, ec);
-        if (ec) {
-            skippedPaths.fetch_add(1);
-            return false;
+        std::int64_t mtime_seconds = entry.mtime_seconds;
+        if (!entry.metadata_known) {
+            std::error_code ec;
+            const fs::file_time_type mtime = fs::last_write_time(fs::u8path(entry.full), ec);
+            if (ec) {
+                skippedPaths.fetch_add(1);
+                return false;
+            }
+            mtime_seconds =
+                std::chrono::duration_cast<std::chrono::seconds>(mtime.time_since_epoch()).count();
         }
-        const std::int64_t mtime_seconds =
-            std::chrono::duration_cast<std::chrono::seconds>(mtime.time_since_epoch()).count();
         // "Newer than X" includes X itself, so a file touched exactly at the
         // cutoff is reported.
         if (mtime_seconds < cutoff_seconds_) return false;
@@ -422,6 +452,154 @@ void FileSearcher::scanContent(const fs::path& path) {
 }
 
 void FileSearcher::scanDirectory(const fs::path& path, std::size_t depth) {
+    // Matches found by this task, merged under one lock when the directory is
+    // finished, so a directory with many hits takes the results mutex once
+    // instead of once per match.
+    std::vector<std::string> found;
+    enumerateInto(path, depth, found);
+
+    if (!found.empty()) {
+        std::lock_guard<std::mutex> lock(results_mutex);
+        matches.insert(matches.end(), std::make_move_iterator(found.begin()),
+                       std::make_move_iterator(found.end()));
+    }
+}
+
+// Applies the search rules to one entry. Everything that decides whether an
+// entry is reported, descended into or ignored lives here, so the Windows and
+// the POSIX enumerator cannot drift apart.
+void FileSearcher::considerEntry(const EntryRecord& entry, std::size_t depth,
+                                 std::vector<std::string>& found) {
+    // Hidden and excluded entries are pruned before anything else: not counted,
+    // not reported, and a directory among them is never enqueued as a task.
+    if ((!options.include_hidden && entry.hidden) ||
+        matchesAnyGlob(entry.name, options.exclude)) {
+        return;
+    }
+
+    bool is_directory = entry.directory;
+    bool is_regular = entry.regular_file;
+
+    if (entry.link) {
+        // A link is only ever looked through with --follow-symlinks. Without it
+        // the entry is neither a file nor a directory, which keeps the "never
+        // follow a link" guarantee and is why a junction - which Win32 reports
+        // as a directory - is not descended into.
+        if (!options.follow_symlinks) return;
+        std::error_code target_ec;
+        const fs::file_status target = fs::status(fs::u8path(entry.full), target_ec);
+        if (target_ec) {
+            skippedPaths.fetch_add(1);
+            return;
+        }
+        is_directory = fs::is_directory(target);
+        is_regular = fs::is_regular_file(target);
+    }
+
+    if (is_directory) {
+        // `depth` is the level of this directory, so its children sit at
+        // depth + 1 and may only be descended into while depth < max_depth.
+        if (depth >= options.max_depth) return;
+        const fs::path child = fs::u8path(entry.full);
+        // With --follow-symlinks every directory reached is recorded, so a link
+        // or junction pointing back at an ancestor is caught before it can be
+        // scanned twice.
+        if (options.follow_symlinks && markVisited(child)) return;
+        submit(child, depth + 1);
+        return;
+    }
+
+    if (!is_regular) return;
+
+    filesScanned.fetch_add(1);
+    // An empty query means "any name": --content is usually run without a name
+    // filter.
+    const bool name_ok = options.query.empty() || nameMatches(entry.name);
+    if (!matchesExtension(entry.name, options.extensions) || !name_ok) return;
+    if (!passesSizeAndTime(entry)) return;
+
+    if (options.content.empty()) {
+        found.emplace_back(entry.full);
+    } else {
+        submitContent(fs::u8path(entry.full));
+    }
+}
+
+#if defined(_WIN32)
+void FileSearcher::enumerateInto(const fs::path& path, std::size_t depth,
+                                 std::vector<std::string>& found) {
+    // FindFirstFileExW returns the attributes, the size and the timestamp
+    // together with the name, so an entry costs one call into the kernel
+    // instead of a listing plus a GetFileAttributesW. FindExInfoBasic omits the
+    // 8.3 short name and FIND_FIRST_EX_LARGE_FETCH asks for a larger buffer, so
+    // a directory with many entries needs fewer round trips.
+    std::wstring pattern = path.wstring();
+    if (pattern.empty() || pattern.back() != L'\\') pattern.push_back(L'\\');
+    pattern.push_back(L'*');
+
+    WIN32_FIND_DATAW data;
+    const HANDLE handle = ::FindFirstFileExW(pattern.c_str(), FindExInfoBasic, &data,
+                                             FindExSearchNameMatch, nullptr,
+                                             FIND_FIRST_EX_LARGE_FETCH);
+    if (handle == INVALID_HANDLE_VALUE) {
+        // An empty directory is not a failure: the provider reports "no files"
+        // for it. Anything else - a path past MAX_PATH, a directory removed
+        // mid-scan - is counted as skipped, which is how it was reported before.
+        const DWORD error = ::GetLastError();
+        const DWORD attributes = ::GetFileAttributesW(path.c_str());
+        if (error == ERROR_FILE_NOT_FOUND && attributes != INVALID_FILE_ATTRIBUTES &&
+            (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+            directoriesScanned.fetch_add(1);
+        } else {
+            skippedPaths.fetch_add(1);
+        }
+        return;
+    }
+
+    directoriesScanned.fetch_add(1);
+
+    // The directory part is converted once, not once per entry.
+    std::string prefix = path.u8string();
+    if (!prefix.empty() && prefix.back() != '\\') prefix.push_back('\\');
+
+    std::string name;
+    std::string full;
+    do {
+        const wchar_t* wide_name = data.cFileName;
+        // FindFirstFileExW lists "." and ".."; directory_iterator does not.
+        if (wide_name[0] == L'.' &&
+            (wide_name[1] == L'\0' || (wide_name[1] == L'.' && wide_name[2] == L'\0'))) {
+            continue;
+        }
+
+        name = wideToUtf8(wide_name, std::wcslen(wide_name));
+        full.assign(prefix);
+        full += name;
+
+        EntryRecord record;
+        record.name = name;
+        record.full = full;
+        record.hidden =
+            (data.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) != 0 || isHiddenByName(name);
+        record.link = (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        record.directory = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        record.regular_file = !record.directory && !record.link;
+        record.metadata_known = true;
+        record.size = (static_cast<std::uintmax_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+        record.mtime_seconds = filetimeToFileSeconds(data.ftLastWriteTime);
+
+        considerEntry(record, depth, found);
+    } while (::FindNextFileW(handle, &data));
+
+    // A listing that stops early loses entries silently, so a real failure is
+    // counted rather than ignored.
+    if (::GetLastError() != ERROR_NO_MORE_FILES) skippedPaths.fetch_add(1);
+
+    ::FindClose(handle);
+}
+#else
+void FileSearcher::enumerateInto(const fs::path& path, std::size_t depth,
+                                 std::vector<std::string>& found) {
     // skip_permission_denied asks the iterator to walk past entries it is not
     // allowed to read instead of throwing. All remaining filesystem calls use
     // the error_code overloads, so nothing escapes as an exception.
@@ -434,11 +612,6 @@ void FileSearcher::scanDirectory(const fs::path& path, std::size_t depth) {
 
     directoriesScanned.fetch_add(1);
 
-    // Matches found by this task, merged under one lock when the directory is
-    // finished, so a directory with many hits takes the results mutex once
-    // instead of once per match.
-    std::vector<std::string> found;
-
     const fs::directory_iterator end;
     while (it != end) {
         const fs::directory_entry& entry = *it;
@@ -448,61 +621,22 @@ void FileSearcher::scanDirectory(const fs::path& path, std::size_t depth) {
         if (entry_ec) {
             skippedPaths.fetch_add(1);
         } else {
-            const std::string name = entry.path().filename().u8string();
-            const EntryFlags flags = inspectEntry(entry, link_status, name);
+            std::string name = entry.path().filename().u8string();
+            std::string full = entry.path().u8string();
 
-            // Hidden and excluded entries are pruned before anything else: not
-            // counted, not reported, and a directory among them is never
-            // enqueued as a task.
-            const bool pruned = (!options.include_hidden && flags.hidden) ||
-                                matchesAnyGlob(name, options.exclude);
+            EntryRecord record;
+            record.name = name;
+            record.full = full;
+            record.hidden = isHiddenByName(name);
+            record.link = fs::is_symlink(link_status);
+            // Taken from symlink_status, so a link is neither a directory nor a
+            // regular file here: considerEntry decides whether to look through
+            // it.
+            record.directory = fs::is_directory(link_status);
+            record.regular_file = fs::is_regular_file(link_status);
+            record.metadata_known = false;
 
-            if (!pruned) {
-                // What the entry really is. Without --follow-symlinks a link is
-                // neither a directory nor a regular file here, which is what
-                // keeps the "never follow a link" guarantee.
-                fs::file_status effective = link_status;
-                bool resolved = true;
-                if (flags.link && options.follow_symlinks) {
-                    std::error_code target_ec;
-                    effective = entry.status(target_ec);
-                    if (target_ec) {
-                        skippedPaths.fetch_add(1);
-                        resolved = false;
-                    }
-                }
-
-                if (resolved && fs::is_directory(effective)) {
-                    // `depth` is the level of this directory, so its children
-                    // sit at depth + 1 and may only be descended into while
-                    // depth < max_depth.
-                    if (depth < options.max_depth) {
-                        bool descend = true;
-                        if (options.follow_symlinks) {
-                            // Every directory reached is recorded, so a link or
-                            // junction pointing back at an ancestor is caught
-                            // before it can be scanned twice.
-                            descend = !markVisited(entry.path());
-                        } else {
-                            descend = !flags.link;
-                        }
-                        if (descend) submit(entry.path(), depth + 1);
-                    }
-                } else if (resolved && fs::is_regular_file(effective)) {
-                    filesScanned.fetch_add(1);
-                    // An empty query means "any name": --content is usually run
-                    // without a name filter.
-                    const bool name_ok = options.query.empty() || nameMatches(name);
-                    if (matchesExtension(name, options.extensions) && name_ok &&
-                        passesSizeAndTime(entry.path())) {
-                        if (options.content.empty()) {
-                            found.push_back(entry.path().u8string());
-                        } else {
-                            submitContent(entry.path());
-                        }
-                    }
-                }
-            }
+            considerEntry(record, depth, found);
         }
 
         it.increment(ec);
@@ -511,13 +645,8 @@ void FileSearcher::scanDirectory(const fs::path& path, std::size_t depth) {
             break;
         }
     }
-
-    if (!found.empty()) {
-        std::lock_guard<std::mutex> lock(results_mutex);
-        matches.insert(matches.end(), std::make_move_iterator(found.begin()),
-                       std::make_move_iterator(found.end()));
-    }
 }
+#endif
 
 void FileSearcher::submit(const fs::path& path, std::size_t depth) {
     pool.enqueue([this, path, depth] {
