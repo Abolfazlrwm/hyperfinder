@@ -90,3 +90,8 @@ desktop.ini
 # Local assistant/workspace state (never part of the project)
 # ---------------------------------------------------------------------------
 .workbuddy-ai/
+
+# Local benchmark trees live outside the repo (C:/dev/bench-data), but ignore
+# them here too so a tree created inside the checkout can never be committed.
+bench-data/
+*.bench-tree/

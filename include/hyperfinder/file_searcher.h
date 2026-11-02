@@ -70,16 +70,53 @@ public:
     std::uint64_t getSkippedCount() const;
 
 private:
+    // What the directory enumerator learned about one entry.
+    //
+    // `name` and `full` are UTF-8 and only valid for the duration of the call
+    // that receives this record: the Windows enumerator fills them from reused
+    // buffers so a scan does not allocate two strings per entry.
+    //
+    // The type fields describe what the entry *is* after symlink resolution,
+    // which is the enumerator's job because only it knows whether the entry was
+    // a reparse point and whether --follow-symlinks was asked for.
+    struct EntryRecord {
+        std::string_view name;
+        std::string_view full;
+        bool directory = false;
+        bool regular_file = false;
+        bool link = false;
+        bool hidden = false;
+        // True when `size` and `mtime_seconds` came from the enumerator, so the
+        // filters can be applied without another stat call.
+        bool metadata_known = false;
+        std::uintmax_t size = 0;
+        std::int64_t mtime_seconds = 0;
+    };
+
     // depth is the level of `path` itself: 0 for the root, 1 for its children.
     void scanDirectory(const fs::path& path, std::size_t depth);
+
+    // Enumerates one directory and hands every entry to considerEntry. There is
+    // one implementation per platform: FindFirstFileExW on Windows, a
+    // directory_iterator elsewhere. Both only decide *how to list* a directory;
+    // what to do with an entry lives in considerEntry alone.
+    void enumerateInto(const fs::path& path, std::size_t depth, std::vector<std::string>& found);
+
     void submit(const fs::path& path, std::size_t depth);
     void recordError(std::exception_ptr error);
-    bool nameMatches(const std::string& filename) const;
+    bool nameMatches(std::string_view filename) const;
+
+    // Applies the search rules to one entry: pruning, descending, counting and
+    // collecting. Shared by the Windows and the POSIX enumerator so the two
+    // cannot drift apart.
+    void considerEntry(const EntryRecord& entry, std::size_t depth,
+                       std::vector<std::string>& found);
 
     // Applies the --min-size/--max-size and --newer-than bounds to a regular
-    // file. Both stats are only taken when the corresponding filter is active,
-    // so an unfiltered search pays nothing for them.
-    bool passesSizeAndTime(const fs::path& path);
+    // file. Both stats are only taken when the corresponding filter is active
+    // and the enumerator did not already supply them, so an unfiltered search
+    // pays nothing for them.
+    bool passesSizeAndTime(const EntryRecord& entry);
 
     // Reads `path` in chunks and appends one ContentMatch per matching line.
     // Runs on a pool thread; merges its results under results_mutex.

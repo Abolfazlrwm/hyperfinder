@@ -181,6 +181,17 @@ if(HYPERFINDER_BUILD_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------
+# Benchmark tools
+# ---------------------------------------------------------------------------
+# Instrumentation for the benchmarks, never built by default: it is not part of
+# the product and it must not slow down a normal build. CI builds it with the
+# option on so it cannot rot.
+option(HYPERFINDER_BUILD_BENCHMARKS "Build the benchmark instrumentation" OFF)
+if(HYPERFINDER_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
+endif()
+
+# ---------------------------------------------------------------------------
 # Install rules and an exported package config
 # ---------------------------------------------------------------------------
 # Everything goes into the standard GNU directories, so the default prefix
