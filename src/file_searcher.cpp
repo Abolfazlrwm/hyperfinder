@@ -288,7 +288,11 @@ FileSearcher::FileSearcher(const std::string& q, const fs::path& root)
 bool FileSearcher::nameMatches(std::string_view filename) const {
     switch (match_mode_) {
         case MatchMode::Substring:
-            return options.ignore_case ? toLowerAscii(filename).find(query) != std::string::npos
+            // Folding in place instead of building a lower-cased copy of the
+            // name: the copy was one heap allocation per file, which is the
+            // single most frequent allocation in a scan. `query` is already
+            // folded once in the constructor.
+            return options.ignore_case ? findAsciiCaseInsensitive(filename, query) != std::string::npos
                                        : filename.find(query) != std::string::npos;
 
         case MatchMode::Glob: {
