@@ -1,10 +1,14 @@
 # hyperfinder
 
+<p align="center"><img src="assets/banner.png" alt="hyperfinder banner" width="100%"></p>
+
 [![CI](https://img.shields.io/github/actions/workflow/status/Abolfazlrwm/hyperfinder/ci.yml?branch=main&label=CI&labelColor=1a1b26)](https://github.com/Abolfazlrwm/hyperfinder/actions) [![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?style=flat&logo=cplusplus&labelColor=1a1b26)](https://en.cppreference.com) [![License: MIT](https://img.shields.io/badge/License-MIT-3fb950?style=flat&labelColor=1a1b26)](LICENSE)
 
 [![CI](https://github.com/Abolfazlrwm/hyperfinder/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Abolfazlrwm/hyperfinder/actions/workflows/ci.yml)
 
 A multi-threaded command-line file finder in **C++17**.
+
+<p align="center"><img src="assets/terminal-demo.png" alt="hyperfinder terminal demo" width="88%"></p>
 
 `hyperfinder` walks a directory tree and reports every file whose name matches a
 substring, spreading the traversal across a pool of worker threads instead of
