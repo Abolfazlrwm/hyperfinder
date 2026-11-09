@@ -335,7 +335,7 @@ Unless stated otherwise the machine is **Windows 11, MinGW-w64 GCC 16.2.0,
 CMake 4.4.4, Ninja**.
 
 - `cmake --preset dev`, `cmake --build --preset dev` and `ctest --preset dev`
-  build with zero warnings and pass: **142 doctest cases / 383 assertions**, plus
+  build with zero warnings and pass: **143 doctest cases / 387 assertions**, plus
   **48 end-to-end cases** that run the built executable. The `release` preset
   passes the same suite.
 - The install rules were checked earlier by installing into a temporary prefix
