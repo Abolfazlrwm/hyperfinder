@@ -1,5 +1,7 @@
 # hyperfinder
 
+[![CI](https://img.shields.io/github/actions/workflow/status/Abolfazlrwm/hyperfinder/ci.yml?branch=main&label=CI&labelColor=1a1b26)](https://github.com/Abolfazlrwm/hyperfinder/actions) [![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?style=flat&logo=cplusplus&labelColor=1a1b26)](https://en.cppreference.com) [![License: MIT](https://img.shields.io/badge/License-MIT-3fb950?style=flat&labelColor=1a1b26)](LICENSE)
+
 [![CI](https://github.com/Abolfazlrwm/hyperfinder/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Abolfazlrwm/hyperfinder/actions/workflows/ci.yml)
 
 A multi-threaded command-line file finder in **C++17**.
