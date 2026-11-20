@@ -94,7 +94,10 @@ jobs:
         run: >
           gcovr -r . --object-directory build-cov
           --exclude '.*tests/.*'
-          --txt-summary report.txt
+          --exclude '.*_deps/.*'
+          --exclude '.*CMakeFiles/.*'
+          --txt report.txt
+          --gcov-ignore-parse-errors negative_hits.warn_once_per_file
           --fail-under-line 70
 
       - name: Show report
