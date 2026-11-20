@@ -63,6 +63,44 @@ jobs:
       - name: Test
         run: ctest --preset release -V
 
+  coverage:
+    # Line-coverage summary on Linux GCC: build the unit tests with gcov
+    # instrumentation, run them, and fail when the non-test line coverage
+    # drops below the gate. Keeps the suite honest about what it exercises.
+    name: Coverage (Linux GCC)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install gcovr
+        run: pipx install gcovr
+
+      - name: Configure
+        run: >
+          cmake -S . -B build-cov -G "Unix Makefiles"
+          -DCMAKE_BUILD_TYPE=Debug
+          -DHYPERFINDER_BUILD_TESTS=ON
+          -DCMAKE_CXX_FLAGS=--coverage
+          -DCMAKE_EXE_LINKER_FLAGS=--coverage
+
+      - name: Build
+        run: cmake --build build-cov --parallel
+
+      - name: Test
+        run: ctest --test-dir build-cov --output-on-failure
+
+      - name: Coverage summary and gate
+        run: >
+          gcovr -r . --object-directory build-cov
+          --exclude '.*tests/.*'
+          --txt-summary report.txt
+          --fail-under-line 70
+
+      - name: Show report
+        if: always()
+        run: cat report.txt
+
   sanitizers:
     name: Linux ${{ matrix.preset }}
     runs-on: ubuntu-latest
