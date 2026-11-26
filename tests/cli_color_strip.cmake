@@ -11,12 +11,16 @@ endif()
 string(ASCII 27 esc)
 set(args a.txt "${FIXTURE}")
 
+# --unset keeps a NO_COLOR exported by the calling shell from turning both runs
+# plain, which would make the comparison below pass for the wrong reason.
 execute_process(
-    COMMAND "${EXE}" --color=always ${args}
+    COMMAND ${CMAKE_COMMAND} -E env --unset=NO_COLOR
+            "${EXE}" --color=always ${args}
     OUTPUT_VARIABLE colored
     RESULT_VARIABLE code_always)
 execute_process(
-    COMMAND "${EXE}" --color=never ${args}
+    COMMAND ${CMAKE_COMMAND} -E env --unset=NO_COLOR
+            "${EXE}" --color=never ${args}
     OUTPUT_VARIABLE plain
     RESULT_VARIABLE code_never)
 

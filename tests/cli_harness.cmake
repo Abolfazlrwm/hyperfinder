@@ -20,9 +20,15 @@ endif()
 
 # An optional NAME=VALUE environment override for the child, used to simulate
 # NO_COLOR without changing the test runner's own environment.
-set(command "${EXE}" ${arguments})
+#
+# NO_COLOR is unset for every child, because the runner's environment is not
+# the thing under test: a developer shell that exports NO_COLOR would otherwise
+# make the --color=always cases fail with no visible cause. An explicit
+# ENV_SPEC is applied after the unset, so a case that sets NO_COLOR itself
+# still works.
+set(command ${CMAKE_COMMAND} -E env --unset=NO_COLOR "${EXE}" ${arguments})
 if(DEFINED ENV_SPEC AND NOT "${ENV_SPEC}" STREQUAL "")
-    set(command ${CMAKE_COMMAND} -E env "${ENV_SPEC}" ${command})
+    set(command ${CMAKE_COMMAND} -E env --unset=NO_COLOR "${ENV_SPEC}" ${command})
 endif()
 
 execute_process(
