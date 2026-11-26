@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(hyperfinder
-    VERSION 0.1.0
+    VERSION 1.1.0
     DESCRIPTION "Multi-threaded file finder"
     HOMEPAGE_URL "https://github.com/Abolfazlrwm/hyperfinder"
     LANGUAGES CXX
@@ -233,8 +233,8 @@ configure_package_config_file(
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hyperfinder
 )
 
-# SameMajorVersion: 0.x releases may break the API, so a consumer asking for
-# 0.1 must not silently get 0.2.
+# SameMajorVersion: a consumer asking for 1.x will never silently get 2.x, the
+# major version where breaking changes (if any) would land.
 write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/hyperfinderConfigVersion.cmake
     VERSION ${PROJECT_VERSION}
