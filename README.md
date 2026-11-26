@@ -4,8 +4,6 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/Abolfazlrwm/hyperfinder/ci.yml?branch=main&label=CI&labelColor=1a1b26)](https://github.com/Abolfazlrwm/hyperfinder/actions) [![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?style=flat&logo=cplusplus&labelColor=1a1b26)](https://en.cppreference.com) [![License: MIT](https://img.shields.io/badge/License-MIT-3fb950?style=flat&labelColor=1a1b26)](LICENSE)
 
-[![CI](https://github.com/Abolfazlrwm/hyperfinder/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Abolfazlrwm/hyperfinder/actions/workflows/ci.yml)
-
 A multi-threaded command-line file finder in **C++17**.
 
 <p align="center"><img src="assets/terminal-demo.png" alt="hyperfinder terminal demo" width="88%"></p>
@@ -72,6 +70,15 @@ ctest --test-dir build --output-on-failure
 | `HYPERFINDER_BUILD_TESTS` | `ON` | build and register the test suite |
 | `HYPERFINDER_ENABLE_SANITIZERS` | `OFF` | add the sanitizer flags |
 | `HYPERFINDER_SANITIZER` | `address,undefined` | which sanitizers, when enabled |
+
+### Prebuilt binaries
+
+Every tagged release carries archives for Linux, macOS and Windows on the
+[Releases](https://github.com/Abolfazlrwm/hyperfinder/releases) page: the
+executable, this README and the license, plus a `SHA256SUMS` file that covers
+every archive. The archives are built and tested by CI before they are
+published, so a release tag means the binaries in it passed the same suite as
+the source.
 
 ### Install
 
